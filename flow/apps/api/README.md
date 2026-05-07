@@ -26,7 +26,28 @@ REDIS_PORT=6379
 DATABASE_URL=postgresql://user:password@localhost:5432/flow
 SUPABASE_URL=https://...
 SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE=...
 ```
+
+## Database Setup
+
+Initialize the database schema:
+
+```bash
+# From apps/api directory
+cd apps/api
+
+# Generate migrations from schema changes
+npm run db:generate
+
+# Apply migrations to Neon database
+npm run db:migrate
+
+# Optionally: view database visually
+npm run db:studio
+```
+
+See [src/db/schema/README.md](src/db/schema/README.md) for full database documentation.
 
 ## Development
 

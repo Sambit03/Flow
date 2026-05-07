@@ -1,4 +1,5 @@
 import { eq, and } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
 import db from "../../lib/db";
 import { workflows, nodes, edges, executions, stepLogs } from "../schema";
 
@@ -33,12 +34,14 @@ export async function createWorkflow(
   name: string,
   description?: string,
 ) {
+  const webhookSecret = `whsec_${uuidv4()}`;
   return await db
     .insert(workflows)
     .values({
       userId,
       name,
       description,
+      webhookSecret,
       isActive: false,
     })
     .returning();

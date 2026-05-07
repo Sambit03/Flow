@@ -7,13 +7,15 @@ import { executions, stepLogs } from "../schema";
 export async function createExecution(
   workflowId: string,
   trigger: "webhook" | "cron" | "manual",
+  triggerPayload: Record<string, any> = {},
 ) {
   return await db
     .insert(executions)
     .values({
       workflowId,
-      status: "running",
+      status: "pending",
       trigger,
+      triggerPayload,
     })
     .returning();
 }
@@ -22,11 +24,7 @@ export async function getExecutionById(executionId: string) {
   return await db.query.executions.findFirst({
     where: eq(executions.id, executionId),
     with: {
-      stepLogs: {
-        with: {
-          node: true,
-        },
-      },
+      stepLogs: true,
     },
   });
 }
@@ -66,6 +64,8 @@ export async function updateExecutionStatus(
 export async function createStepLog(
   executionId: string,
   nodeId: string,
+  nodeType: string,
+  nodeLabel: string,
   status: "pending" | "running" | "success" | "failed" = "pending",
 ) {
   return await db
@@ -73,8 +73,10 @@ export async function createStepLog(
     .values({
       executionId,
       nodeId,
+      nodeType,
+      nodeLabel,
       status,
-      startedAt: new Date(),
+      attemptNumber: 1,
     })
     .returning();
 }
@@ -103,8 +105,5 @@ export async function updateStepLog(
 export async function getStepLogsByExecution(executionId: string) {
   return await db.query.stepLogs.findMany({
     where: eq(stepLogs.executionId, executionId),
-    with: {
-      node: true,
-    },
   });
 }

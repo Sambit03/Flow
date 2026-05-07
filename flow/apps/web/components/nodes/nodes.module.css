@@ -1,0 +1,144 @@
+.node {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  min-width: 180px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  overflow: visible;
+}
+
+.node:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.nodeSelected {
+  border-color: var(--brand-primary) !important;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.25), var(--shadow-md) !important;
+}
+
+.nodeTrigger { border-color: rgba(16,185,129,0.3); }
+.nodeAction  { border-color: rgba(99,102,241,0.3); }
+.nodeCondition { border-color: rgba(245,158,11,0.3); }
+.nodeDelay   { border-color: rgba(139,92,246,0.3); }
+
+.nodeHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.nodeTypeIcon { font-size: 14px; }
+
+.nodeTypeName {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.nodeBody {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nodeLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.nodeSubtext {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Status ring ─────────────────────────────────── */
+.statusRing {
+  position: absolute;
+  inset: -3px;
+  border-radius: calc(var(--radius-lg) + 3px);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ring_running {
+  border: 2px solid var(--status-running);
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+.ring_success { border: 2px solid var(--status-success); }
+.ring_failed  { border: 2px solid var(--status-error); }
+
+/* ── Status icon ─────────────────────────────────── */
+.statusIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.icon_running  { background: var(--status-running-bg);  color: var(--status-running); }
+.icon_success  { background: var(--status-success-bg);  color: var(--status-success); }
+.icon_failed   { background: var(--status-error-bg);    color: var(--status-error); }
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(99,102,241,0.3);
+  border-top-color: var(--status-running);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* ── Condition branches ───────────────────────────── */
+.conditionBranches {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.branchTrue, .branchFalse {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+
+.branchTrue {
+  background: var(--status-success-bg);
+  color: var(--status-success);
+}
+
+.branchFalse {
+  background: var(--status-error-bg);
+  color: var(--status-error);
+}
+
+/* ── Handles ─────────────────────────────────────── */
+.handle {
+  background: var(--border-strong) !important;
+  border: 2px solid var(--bg-elevated) !important;
+  width: 10px !important;
+  height: 10px !important;
+  transition: background 0.15s !important;
+}
+.handle:hover { background: var(--brand-primary) !important; }

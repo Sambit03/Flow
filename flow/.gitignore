@@ -89,7 +89,30 @@ logs/
 *.swp
 *.tmp
 
-# Project tracking files (local only)
+# Project tracking / generated docs (local only)
 PROGRESS.md
 FLOW_PROJECT_BREAKDOWN.md
+API_AUDIT_TESTING_COMPLETE.md
+API_IMPLEMENTATION_COMPLETE.md
+API_TESTING_GUIDE.md
+DOCUMENTATION_INDEX.md
+FLOW_SCHEMA.md
+IMPLEMENTATION_COMPLETE.md
+IMPLEMENTATION_GUIDE.md
+NEON_AUTH_IMPLEMENTATION.md
+NEON_AUTH_SCHEMA_IMPLEMENTATION.md
+QUICK_FIXES_FOR_TESTS.md
+RLS_SETUP_INSTRUCTIONS.md
+TEST_EXECUTION_REPORT.md
+TEST_SUITE_COMPLETE.md
+TEST_SUITE_DOCUMENTATION.md
+TEST_SUITE_SUMMARY.md
+
+# Test output files
+apps/api/out.txt
+apps/api/test-output.txt
+apps/api/test-results.txt
+
+# Dev scripts
+test-api.ps1
 
