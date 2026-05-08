@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auth } from '@/lib/api';
+import { authClient } from '@/lib/auth/client';
 import { useAuthStore } from '@/store';
 import styles from '../auth.module.css';
 
@@ -22,8 +22,24 @@ export default function SignupPage() {
     setError('');
     setLoading(true);
     try {
-      const result = await auth.signup(email, password, username);
-      setAuth(result.token, result.user);
+      const { error: signUpError } = await authClient.signUp.email({
+        email,
+        password,
+        name: username || email.split('@')[0],
+      });
+      if (signUpError) {
+        setError(signUpError.message || 'Sign up failed');
+        return;
+      }
+
+      const { data } = await authClient.getSession();
+      if (data?.session && data?.user) {
+        setAuth(data.session.token, {
+          userId: data.user.id,
+          email: data.user.email,
+          username: data.user.name ?? undefined,
+        });
+      }
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed');

@@ -18,6 +18,7 @@ import { workflows, nodes, edges, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { syncWorkflowSchedule } from "@/scheduler";
 
 const router = Router();
 
@@ -162,6 +163,11 @@ router.put("/:id", async (req: Request, res: Response) => {
       .where(eq(workflows.id, id))
       .returning();
 
+    // Sync the in-memory cron scheduler whenever isActive changes
+    if (isActive !== undefined && updated) {
+      syncWorkflowSchedule(id, updated.isActive, updated.cronExpression);
+    }
+
     res.json(updated);
   } catch (error) {
     console.error("Error updating workflow:", error);
@@ -259,17 +265,19 @@ router.post("/:id/execute", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to create execution" });
     }
 
-    // Create step logs for all nodes
-    await db.insert(stepLogs).values(
-      workflow.nodes.map((node) => ({
-        executionId: execution.id,
-        nodeId: node.id,
-        nodeType: node.type,
-        nodeLabel: node.label,
-        status: "pending",
-        attemptNumber: 1,
-      })),
-    );
+    // Create step logs for all nodes (guard: values([]) throws in Postgres)
+    if (workflow.nodes.length > 0) {
+      await db.insert(stepLogs).values(
+        workflow.nodes.map((node) => ({
+          executionId: execution.id,
+          nodeId: node.id,
+          nodeType: node.type,
+          nodeLabel: node.label,
+          status: "pending",
+          attemptNumber: 1,
+        })),
+      );
+    }
 
     // Queue the execution job
     await workflowQueue.add(`execution-${execution.id}`, {

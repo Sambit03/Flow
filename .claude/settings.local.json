@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\cs\\\\CAPSTONE\\\\flow\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Recurse \"d:\\\\cs\\\\CAPSTONE\\\\flow\\\\apps\\\\web\\\\components\\\\\" | Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Path \"d:\\\\cs\\\\CAPSTONE\\\\flow\\\\apps\\\\web\\\\app\" -Force)",
+      "Bash(Select-Object -Property Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)"
+    ]
+  }
+}

@@ -78,14 +78,61 @@
   padding: 3px 10px;
   border-radius: var(--radius-full);
   flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.runBadgeOk {
+.runBadgeRunning {
   background: var(--status-running-bg);
   color: var(--status-running);
+  animation: badge-pulse 1.5s ease-in-out infinite;
 }
-.runBadgeError {
+.runBadgeSuccess {
+  background: var(--status-success-bg);
+  color: var(--status-success);
+}
+.runBadgeFailed {
   background: var(--status-error-bg);
   color: var(--status-error);
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+
+.btnToggle {
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btnToggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnActivate {
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border-color: var(--status-success);
+}
+.btnActivate:hover:not(:disabled) {
+  background: var(--status-success);
+  color: #fff;
+}
+
+.btnDeactivate {
+  background: var(--status-running-bg);
+  color: var(--status-running);
+  border-color: var(--status-running);
+}
+.btnDeactivate:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
 }
 
 .btnRun {

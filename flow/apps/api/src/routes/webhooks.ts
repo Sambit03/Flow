@@ -13,6 +13,7 @@ import { db } from "@/db";
 import { workflows, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
 import { eq } from "drizzle-orm";
+import { isValidUUID } from "@/lib/validateUUID";
 
 const router = Router();
 
@@ -33,6 +34,10 @@ router.post("/:workflowId", async (req: Request, res: Response) => {
 
     if (!workflowId) {
       return res.status(400).json({ error: "Workflow ID is required" });
+    }
+
+    if (!isValidUUID(workflowId)) {
+      return res.status(401).json({ error: "Invalid webhook secret" });
     }
 
     if (!webhookSecret) {

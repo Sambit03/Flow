@@ -10,6 +10,7 @@ import ReactFlow, {
   addEdge,
   applyNodeChanges,
   applyEdgeChanges,
+  type Edge,
   type NodeChange,
   type EdgeChange,
   type Connection,
@@ -21,6 +22,7 @@ import { nodeTypes } from '@/components/nodes/FlowNodes';
 import NodeSidebar from '@/components/NodeSidebar/NodeSidebar';
 import { useCanvasStore, type CanvasNode, type CanvasEdge } from '@/store';
 import { workflows as workflowsApi, type ApiNode, type ApiEdge } from '@/lib/api';
+import { useExecutionStream } from '@/hooks/useExecutionStream';
 import styles from './canvas.module.css';
 
 // ── Data transform helpers ────────────────────────────────
@@ -35,7 +37,9 @@ function toCanvasNode(n: ApiNode): CanvasNode {
 }
 
 function toCanvasEdge(e: ApiEdge): CanvasEdge {
-  return { id: e.id, source: e.sourceId, target: e.targetId };
+  // Map DB branch value back to the ReactFlow sourceHandle id
+  const sourceHandle = (e.branch === 'true' || e.branch === 'false') ? e.branch : 'out';
+  return { id: e.id, source: e.sourceId, target: e.targetId, sourceHandle };
 }
 
 // ── Node palette ──────────────────────────────────────────
@@ -81,12 +85,15 @@ export default function CanvasPage() {
   const edges           = useCanvasStore((s) => s.edges);
   const isDirty         = useCanvasStore((s) => s.isDirty);
   const selectedNodeId  = useCanvasStore((s) => s.selectedNodeId);
+  const isActive        = useCanvasStore((s) => s.isActive);
   const setNodes        = useCanvasStore((s) => s.setNodes);
   const setEdges        = useCanvasStore((s) => s.setEdges);
   const markDirty       = useCanvasStore((s) => s.markDirty);
   const markClean       = useCanvasStore((s) => s.markClean);
   const selectNode      = useCanvasStore((s) => s.selectNode);
   const setActiveExec   = useCanvasStore((s) => s.setActiveExecution);
+  const setWorkflowMeta = useCanvasStore((s) => s.setWorkflowMeta);
+  const setIsActive     = useCanvasStore((s) => s.setIsActive);
 
   // Refs so callbacks always read latest state without re-creating
   const nodesRef = useRef(nodes);
@@ -96,10 +103,13 @@ export default function CanvasPage() {
 
   const rfInstance = useRef<ReactFlowInstance | null>(null);
 
+  const { isStreaming, lastResult } = useExecutionStream();
+
   const [workflowName, setWorkflowName] = useState('');
   const [saving,       setSaving]       = useState(false);
-  const [running,      setRunning]      = useState(false);
-  const [runStatus,    setRunStatus]    = useState<'ok' | 'error' | null>(null);
+  const [starting,     setStarting]     = useState(false);
+  const [toggling,     setToggling]     = useState(false);
+  const [runError,     setRunError]     = useState('');
   const [loading,      setLoading]      = useState(true);
   const [loadError,    setLoadError]    = useState('');
 
@@ -110,17 +120,19 @@ export default function CanvasPage() {
         setWorkflowName(wf.name);
         setNodes(wf.nodes.map(toCanvasNode));
         setEdges(wf.edges.map(toCanvasEdge));
+        setWorkflowMeta({ workflowId: id, isActive: wf.isActive, webhookSecret: wf.webhookSecret });
         markClean();
       })
       .catch(() => setLoadError('Failed to load workflow'))
       .finally(() => setLoading(false));
 
     return () => {
-      // Reset canvas store when leaving this workflow
       setNodes([]);
       setEdges([]);
       selectNode(null);
       markClean();
+      setActiveExec(null);
+      useCanvasStore.getState().clearNodeStatuses();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -135,14 +147,14 @@ export default function CanvasPage() {
   }, [setNodes, markDirty]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    const updated = applyEdgeChanges(changes, edgesRef.current) as CanvasEdge[];
+    const updated = applyEdgeChanges(changes, edgesRef.current as Edge[]) as CanvasEdge[];
     setEdges(updated);
     markDirty();
   }, [setEdges, markDirty]);
 
   const onConnect = useCallback((connection: Connection) => {
     const newEdge = { ...connection, id: crypto.randomUUID() };
-    setEdges(addEdge(newEdge, edgesRef.current) as CanvasEdge[]);
+    setEdges(addEdge(newEdge, edgesRef.current as Edge[]) as CanvasEdge[]);
     markDirty();
   }, [setEdges, markDirty]);
 
@@ -193,6 +205,8 @@ export default function CanvasPage() {
         id:       e.id,
         sourceId: e.source,
         targetId: e.target,
+        // sourceHandle is 'true' or 'false' for condition nodes, 'out' for others
+        branch: (e.sourceHandle === 'true' || e.sourceHandle === 'false') ? e.sourceHandle : null,
       }));
       await workflowsApi.saveCanvas(id, apiNodes, apiEdges);
       markClean();
@@ -206,16 +220,30 @@ export default function CanvasPage() {
   // ── Run ─────────────────────────────────────────────────
 
   async function handleRun() {
-    setRunning(true);
-    setRunStatus(null);
+    setStarting(true);
+    setRunError('');
     try {
       const result = await workflowsApi.execute(id);
+      // Setting activeExecutionId triggers useExecutionStream to open the stream
       setActiveExec(result.execution.id);
-      setRunStatus('ok');
-    } catch {
-      setRunStatus('error');
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : 'Run failed');
     } finally {
-      setRunning(false);
+      setStarting(false);
+    }
+  }
+
+  // ── Activate / Deactivate ───────────────────────────────
+
+  async function handleToggleActive() {
+    setToggling(true);
+    try {
+      const updated = await workflowsApi.update(id, { isActive: !isActive });
+      setIsActive(updated.isActive);
+    } catch {
+      // ignore — could add a toast here
+    } finally {
+      setToggling(false);
     }
   }
 
@@ -268,14 +296,41 @@ export default function CanvasPage() {
 
         <div className={styles.spacer} />
 
-        {runStatus && (
-          <span className={`${styles.runBadge} ${runStatus === 'error' ? styles.runBadgeError : styles.runBadgeOk}`}>
-            {runStatus === 'error' ? 'Run failed' : 'Running…'}
+        {/* Execution status badge */}
+        {runError && (
+          <span className={`${styles.runBadge} ${styles.runBadgeFailed}`}>
+            {runError}
           </span>
         )}
+        {!runError && starting && (
+          <span className={`${styles.runBadge} ${styles.runBadgeRunning}`}>Starting…</span>
+        )}
+        {!runError && !starting && isStreaming && (
+          <span className={`${styles.runBadge} ${styles.runBadgeRunning}`}>Running…</span>
+        )}
+        {!runError && !isStreaming && lastResult === 'success' && (
+          <span className={`${styles.runBadge} ${styles.runBadgeSuccess}`}>✓ Done</span>
+        )}
+        {!runError && !isStreaming && lastResult === 'failed' && (
+          <span className={`${styles.runBadge} ${styles.runBadgeFailed}`}>✕ Failed</span>
+        )}
 
-        <button className={styles.btnRun} onClick={handleRun} disabled={running}>
-          {running ? '…' : '▶ Run'}
+        <button
+          className={`${styles.btnToggle} ${isActive ? styles.btnDeactivate : styles.btnActivate}`}
+          onClick={handleToggleActive}
+          disabled={toggling}
+          title={isActive ? 'Deactivate workflow' : 'Activate workflow'}
+        >
+          {toggling ? '…' : isActive ? '⏸ Active' : '▶ Inactive'}
+        </button>
+
+        <button
+          className={styles.btnRun}
+          onClick={handleRun}
+          disabled={starting || isStreaming || !isActive}
+          title={!isActive ? 'Activate the workflow to run it' : undefined}
+        >
+          {starting ? '…' : '▶ Run'}
         </button>
 
         <button

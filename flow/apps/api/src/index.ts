@@ -1,6 +1,4 @@
 ﻿import express, { Express, Request, Response, NextFunction } from "express";
-import Redis from "ioredis";
-import { Queue, Worker } from "bullmq";
 import cors from "cors";
 
 // Import route handlers
@@ -9,9 +7,13 @@ import workflowRoutes from "@/routes/workflows";
 import nodeRoutes from "@/routes/nodes";
 import edgeRoutes from "@/routes/edges";
 import executionRoutes from "@/routes/executions";
+import streamRoutes from "@/routes/streams";
+import webhookRoutes from "@/routes/webhooks";
 
-// Import queue configuration
+// Import queue configuration, worker, and scheduler
 import { redis, workflowQueue } from "@/queue";
+import { workflowWorker } from "@/worker/workflowWorker";
+import { startScheduler } from "@/scheduler";
 
 const app: Express = express();
 const port = process.env.API_PORT || 5000;
@@ -41,37 +43,14 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// BullMQ Worker Setup
+// Redis & Worker Setup
 // ─────────────────────────────────────────────────────────────
 
 // Add Redis event listeners
 redis.on("error", (err) => console.error("Redis error:", err));
 redis.on("connect", () => console.log("✅ Redis connected"));
 
-const workflowWorker = new Worker(
-  "workflow-execution",
-  async (job) => {
-    try {
-      console.log(`🔄 Processing workflow job ${job.id}:`, job.data);
-      // TODO: Implement workflow execution logic
-      // For now, just mark as completed after a short delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      return { success: true, jobId: job.id };
-    } catch (error) {
-      console.error(`❌ Job ${job.id} failed:`, error);
-      throw error;
-    }
-  },
-  { connection: redis, concurrency: 5 },
-);
-
-workflowWorker.on("completed", (job) => {
-  console.log(`✅ Job ${job.id} completed`);
-});
-
-workflowWorker.on("failed", (job, err) => {
-  console.log(`❌ Job ${job?.id} failed:`, err.message);
-});
+// workflowWorker is imported from @/worker/workflowWorker and starts automatically
 
 // ─────────────────────────────────────────────────────────────
 // Health Check Endpoint
@@ -98,6 +77,10 @@ app.use("/api/workflows", workflowRoutes);
 app.use("/api/workflows", nodeRoutes);
 app.use("/api/workflows", edgeRoutes);
 app.use("/api/workflows", executionRoutes);
+app.use("/api/executions", streamRoutes);
+
+// Public webhook triggers (no JWT — validated by webhook secret)
+app.use("/api/webhooks", webhookRoutes);
 
 // ─────────────────────────────────────────────────────────────
 // Error Handling Middleware
@@ -132,6 +115,9 @@ app.use((req: Request, res: Response) => {
 
 async function startServer() {
   try {
+    // Start cron scheduler after DB is reachable
+    await startScheduler();
+
     app.listen(port, () => {
       console.log(`
 ╔════════════════════════════════════════════════════════════╗

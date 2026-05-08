@@ -73,21 +73,21 @@ router.get("/:executionId/stream", async (req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
-    res.setHeader("Access-Control-Allow-Origin", "*");
 
     // Send initial message
     res.write(
       "data: " + JSON.stringify({ type: "connected", executionId }) + "\n\n",
     );
 
-    // Keep-alive interval
+    // Keep-alive interval (prevents proxy/browser from closing idle connection)
     const keepAliveInterval = setInterval(() => {
       res.write(": keep-alive\n\n");
-    }, 30000); // Send every 30 seconds
+    }, 30_000);
 
-    // Simulate real-time updates (in production, use WebSockets or event emitter)
-    // For now, send step logs with polling
-    let lastLogId = 0;
+    // Poll the DB every second and push changed step statuses to the client.
+    // We track the last-seen status per nodeId so we only emit real changes.
+    const seenStatuses = new Map<string, string>(); // nodeId → last sent status
+
     const pollInterval = setInterval(async () => {
       try {
         const logs = await db
@@ -96,46 +96,40 @@ router.get("/:executionId/stream", async (req: Request, res: Response) => {
           .where(eq(stepLogs.executionId, executionId))
           .orderBy(stepLogs.startedAt);
 
-        // Send new logs since last poll
-        const newLogs = logs.filter((log: any) => {
-          const logId = parseInt(log.id.split("-")[0] || "0", 16);
-          return logId > lastLogId;
-        });
-
-        for (const log of newLogs) {
-          res.write(
-            "data: " +
-              JSON.stringify({
-                type: "step_update",
-                stepId: log.id,
-                status: log.status,
-                nodeLabel: log.nodeLabel,
-                updatedAt: new Date().toISOString(),
-              }) +
-              "\n\n",
-          );
+        for (const log of logs) {
+          if (seenStatuses.get(log.nodeId) !== log.status) {
+            seenStatuses.set(log.nodeId, log.status);
+            res.write(
+              "data: " +
+                JSON.stringify({
+                  type: "step_update",
+                  stepLogId: log.id,
+                  nodeId: log.nodeId,
+                  nodeLabel: log.nodeLabel,
+                  status: log.status,
+                  output: log.output,
+                  error: log.error,
+                  startedAt: log.startedAt,
+                  finishedAt: log.finishedAt,
+                }) +
+                "\n\n",
+            );
+          }
         }
 
-        // Update last log id
-        if (logs.length > 0) {
-          lastLogId = parseInt(
-            logs[logs.length - 1].id.split("-")[0] || "0",
-            16,
-          );
-        }
-
-        // Check if execution is finished
+        // Check if the execution itself is finished
         const updatedExecution = await db.query.executions.findFirst({
           where: eq(executions.id, executionId),
         });
 
-        if (updatedExecution?.endedAt) {
+        if (updatedExecution?.finishedAt) {
           res.write(
             "data: " +
               JSON.stringify({
                 type: "execution_completed",
                 status: updatedExecution.status,
-                completedAt: updatedExecution.endedAt,
+                finishedAt: updatedExecution.finishedAt,
+                error: updatedExecution.error,
               }) +
               "\n\n",
           );
@@ -149,7 +143,7 @@ router.get("/:executionId/stream", async (req: Request, res: Response) => {
         clearInterval(keepAliveInterval);
         res.end();
       }
-    }, 1000); // Poll every 1 second
+    }, 1_000);
 
     // Handle client disconnect
     req.on("close", () => {

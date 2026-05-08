@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useCanvasStore } from '@/store';
 import styles from './NodeSidebar.module.css';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
 const TRIGGER_SUBTYPES = ['manual', 'webhook', 'cron'] as const;
 const ACTION_SUBTYPES  = ['http_request', 'transform', 'log'] as const;
 const HTTP_METHODS     = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -39,24 +41,57 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 /* ── Config panels per type ──────────────────────────── */
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <button className={styles.copyBtn} onClick={copy} type="button">
+      {copied ? '✓' : 'Copy'}
+    </button>
+  );
+}
+
 function TriggerConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (c: Record<string, unknown>) => void }) {
   const subtype = (config.subtype as string) || 'manual';
   const set = (key: string, val: unknown) => onChange({ ...config, [key]: val });
+  const { workflowId, webhookSecret } = useCanvasStore();
+
+  const webhookUrl = workflowId ? `${API_URL}/api/webhooks/${workflowId}` : '';
 
   return (
     <>
       <Field label="Trigger type">
         <Select value={subtype} onChange={(v) => set('subtype', v)} options={TRIGGER_SUBTYPES} />
       </Field>
-      {subtype === 'webhook' && (
-        <Field label="Webhook path">
-          <Input placeholder="/my-webhook" value={(config.path as string) || ''} onChange={(e) => set('path', e.target.value)} />
-        </Field>
+
+      {subtype === 'webhook' && workflowId && (
+        <>
+          <Field label="Webhook URL">
+            <div className={styles.copyRow}>
+              <code className={styles.codeValue}>{webhookUrl}</code>
+              <CopyButton text={webhookUrl} />
+            </div>
+            <span className={styles.hint}>POST to this URL to trigger the workflow</span>
+          </Field>
+          <Field label="Secret header">
+            <div className={styles.copyRow}>
+              <code className={styles.codeValue}>{webhookSecret ?? '—'}</code>
+              {webhookSecret && <CopyButton text={webhookSecret} />}
+            </div>
+            <span className={styles.hint}>Send as <code>x-flow-secret</code> header</span>
+          </Field>
+        </>
       )}
+
       {subtype === 'cron' && (
         <Field label="Cron expression">
           <Input placeholder="* * * * *" value={(config.expression as string) || ''} onChange={(e) => set('expression', e.target.value)} />
-          <span className={styles.hint}>e.g. "0 9 * * 1-5" — every weekday at 9am</span>
+          <span className={styles.hint}>e.g. "0 9 * * 1-5" — every weekday at 9am. Save canvas to apply.</span>
         </Field>
       )}
     </>
@@ -110,19 +145,27 @@ function ActionConfig({ config, onChange }: { config: Record<string, unknown>; o
 
 function ConditionConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (c: Record<string, unknown>) => void }) {
   const set = (key: string, val: unknown) => onChange({ ...config, [key]: val });
-  const OPERATORS = ['equals', 'not_equals', 'contains', 'greater_than', 'less_than', 'exists'] as const;
+  const OPERATORS = ['eq', 'neq', 'contains', 'gt', 'lt', 'exists'] as const;
+  const OPERATOR_LABELS: Record<string, string> = {
+    eq: 'equals', neq: 'not equals', contains: 'contains', gt: 'greater than', lt: 'less than', exists: 'exists',
+  };
 
   return (
     <>
       <Field label="Field (from input)">
-        <Input placeholder="input.status" value={(config.field as string) || ''} onChange={(e) => set('field', e.target.value)} />
+        <Input placeholder="status" value={(config.field as string) || ''} onChange={(e) => set('field', e.target.value)} />
+        <span className={styles.hint}>Dot-path into input, e.g. <code>body.status</code></span>
       </Field>
       <Field label="Operator">
-        <Select value={(config.operator as string) || 'equals'} onChange={(v) => set('operator', v)} options={OPERATORS} />
+        <select className={styles.select} value={(config.operator as string) || 'eq'} onChange={(e) => set('operator', e.target.value)}>
+          {OPERATORS.map((o) => <option key={o} value={o}>{OPERATOR_LABELS[o]}</option>)}
+        </select>
       </Field>
-      <Field label="Expected value">
-        <Input placeholder="200" value={(config.expectedValue as string) || ''} onChange={(e) => set('expectedValue', e.target.value)} />
-      </Field>
+      {(config.operator as string) !== 'exists' && (
+        <Field label="Value">
+          <Input placeholder="200" value={(config.value as string) || ''} onChange={(e) => set('value', e.target.value)} />
+        </Field>
+      )}
     </>
   );
 }

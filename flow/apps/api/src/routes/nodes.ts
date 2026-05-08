@@ -14,6 +14,7 @@ import { db } from "@/db";
 import { workflows, nodes, edges } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { syncWorkflowSchedule } from "@/scheduler";
 
 const router = Router();
 
@@ -47,6 +48,17 @@ router.put("/:workflowId/nodes", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Workflow not found" });
     }
 
+    // Extract cron expression from trigger node (if any) to keep workflow row in sync
+    const cronExpression: string | null =
+      Array.isArray(newNodes)
+        ? (newNodes.find(
+            (n: any) =>
+              n.type === "trigger" &&
+              n.config?.subtype === "cron" &&
+              n.config?.expression,
+          )?.config?.expression ?? null)
+        : null;
+
     // Transactional replace: delete old nodes → insert new nodes
     await db.transaction(async (tx) => {
       // Delete existing nodes and edges
@@ -69,12 +81,15 @@ router.put("/:workflowId/nodes", async (req: Request, res: Response) => {
         );
       }
 
-      // Update workflow timestamp
+      // Keep cronExpression on the workflow row in sync with the trigger node config
       await tx
         .update(workflows)
-        .set({ updatedAt: new Date() })
+        .set({ cronExpression, updatedAt: new Date() })
         .where(eq(workflows.id, workflowId));
     });
+
+    // Re-evaluate the cron schedule in memory
+    syncWorkflowSchedule(workflowId, workflow.isActive, cronExpression);
 
     res.json({ message: "Nodes saved successfully" });
   } catch (error) {

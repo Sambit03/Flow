@@ -1,20 +1,49 @@
 /**
  * API client for the Flow backend.
- * All calls attach the Bearer token from localStorage.
+ * All calls attach the Bearer token from the active Neon Auth session.
  */
+
+import { authClient } from '@/lib/auth/client';
+import { useAuthStore } from '@/store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('flow_token');
+function isJWT(token: string | null | undefined): boolean {
+  return typeof token === 'string' && token.split('.').length === 3;
+}
+
+async function getToken(): Promise<string | null> {
+  const { data } = await authClient.getSession();
+  const sessionToken = data?.session?.token;
+
+  // Prefer the token from authClient only if it is a JWT (set-auth-jwt was
+  // present in the Neon Auth response).  Raw Better Auth session tokens are
+  // NOT recognised by the Express backend's JWKS validation path.
+  if (isJWT(sessionToken)) return sessionToken!;
+
+  // Fall back to the Zustand-persisted token which was set at login time when
+  // set-auth-jwt was present.  This preserves the JWT across getSession()
+  // calls that return a raw token instead of a JWT.
+  return useAuthStore.getState().token;
+}
+
+function handleExpiredSession(): never {
+  useAuthStore.getState().clearAuth();
+  if (typeof window !== 'undefined') {
+    window.location.href = '/login';
+  }
+  throw new Error('Session expired. Please log in again.');
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
+  const token = await getToken();
+
+  // If token is null, send the request anyway — the backend 401 response is the
+  // authoritative signal that the session is gone (handled two lines below).
+
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
@@ -25,39 +54,15 @@ async function request<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      handleExpiredSession();
+    }
     const err = await res.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
 
   return res.json() as Promise<T>;
 }
-
-// ── Auth ──────────────────────────────────────────────────
-
-export interface AuthResult {
-  token: string;
-  user: { userId: string; email: string; username?: string };
-}
-
-export const auth = {
-  signup: (email: string, password: string, username?: string) =>
-    request<AuthResult>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ email, password, username }),
-    }),
-
-  login: (email: string, password: string) =>
-    request<AuthResult>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
-
-  logout: () =>
-    request('/auth/logout', { method: 'POST' }),
-
-  me: () =>
-    request<{ id: string; email: string; username: string }>('/auth/me'),
-};
 
 // ── Workflows ─────────────────────────────────────────────
 
@@ -71,6 +76,8 @@ export interface WorkflowSummary {
 }
 
 export interface WorkflowDetail extends WorkflowSummary {
+  webhookSecret: string;
+  cronExpression?: string | null;
   nodes: ApiNode[];
   edges: ApiEdge[];
 }
@@ -91,6 +98,7 @@ export interface ApiEdge {
   workflowId: string;
   sourceId: string;
   targetId: string;
+  branch?: string | null;
 }
 
 export const workflows = {
@@ -124,7 +132,7 @@ export const workflows = {
     });
     await request(`/api/workflows/${id}/edges`, {
       method: 'PUT',
-      body: JSON.stringify({ edges }),
+      body: JSON.stringify({ edges: edges.map((e) => ({ ...e, branch: e.branch ?? null })) }),
     });
   },
 
@@ -144,6 +152,9 @@ export interface Execution {
   trigger: 'webhook' | 'cron' | 'manual';
   startedAt: string;
   finishedAt?: string;
+  totalSteps?: number;
+  completedSteps?: number;
+  error?: string | null;
 }
 
 export interface StepLog {
@@ -152,7 +163,7 @@ export interface StepLog {
   nodeId: string;
   nodeType: string;
   nodeLabel: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
   input?: unknown;
   output?: unknown;
   error?: string;

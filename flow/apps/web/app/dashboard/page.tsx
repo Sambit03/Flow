@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { workflows as workflowsApi, type WorkflowSummary } from '@/lib/api';
 import { useAuthStore } from '@/store';
+import { authClient } from '@/lib/auth/client';
 import styles from './dashboard.module.css';
 
 function formatDate(iso: string) {
@@ -159,18 +160,17 @@ function CreateModal({ onClose, onCreate }: { onClose: () => void; onCreate: (w:
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, token, clearAuth } = useAuthStore();
+  const { user, clearAuth } = useAuthStore();
   const [wfList, setWfList] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
-    if (!token) { router.push('/login'); return; }
     workflowsApi.list()
       .then(setWfList)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [token, router]);
+  }, []);
 
   const handleDelete = useCallback(async (id: string) => {
     await workflowsApi.delete(id);
@@ -187,7 +187,8 @@ export default function DashboardPage() {
     router.push(`/workflows/${w.id}`);
   }, [router]);
 
-  function handleLogout() {
+  async function handleLogout() {
+    await authClient.signOut();
     clearAuth();
     router.push('/login');
   }

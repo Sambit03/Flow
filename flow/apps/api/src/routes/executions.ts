@@ -32,6 +32,10 @@ router.get("/:workflowId/executions", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Workflow ID is required" });
     }
 
+    if (!isValidUUID(workflowId)) {
+      return res.status(400).json({ error: "Invalid workflow ID format" });
+    }
+
     // Verify ownership
     const workflow = await db.query.workflows.findFirst({
       where: and(eq(workflows.id, workflowId), eq(workflows.userId, userId)),

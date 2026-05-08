@@ -45,7 +45,16 @@ export interface CanvasNode extends Node {
   };
 }
 
-export interface CanvasEdge extends Edge {}
+export type CanvasEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  type?: string;
+  animated?: boolean;
+  data?: Record<string, unknown>;
+};
 
 interface CanvasState {
   nodes: CanvasNode[];
@@ -54,6 +63,11 @@ interface CanvasState {
   isDirty: boolean;
   activeExecutionId: string | null;
   nodeStatuses: Record<string, 'pending' | 'running' | 'success' | 'failed'>;
+
+  // Workflow metadata (set when a workflow is loaded on the canvas)
+  workflowId: string | null;
+  isActive: boolean;
+  webhookSecret: string | null;
 
   setNodes: (nodes: CanvasNode[]) => void;
   setEdges: (edges: CanvasEdge[]) => void;
@@ -65,6 +79,8 @@ interface CanvasState {
   setActiveExecution: (id: string | null) => void;
   setNodeStatus: (nodeId: string, status: 'pending' | 'running' | 'success' | 'failed') => void;
   clearNodeStatuses: () => void;
+  setWorkflowMeta: (meta: { workflowId: string; isActive: boolean; webhookSecret: string }) => void;
+  setIsActive: (active: boolean) => void;
 }
 
 export const useCanvasStore = create<CanvasState>()((set) => ({
@@ -74,6 +90,9 @@ export const useCanvasStore = create<CanvasState>()((set) => ({
   isDirty: false,
   activeExecutionId: null,
   nodeStatuses: {},
+  workflowId: null,
+  isActive: false,
+  webhookSecret: null,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -116,4 +135,9 @@ export const useCanvasStore = create<CanvasState>()((set) => ({
         data: { ...n.data, status: undefined },
       })),
     })),
+
+  setWorkflowMeta: (meta) =>
+    set({ workflowId: meta.workflowId, isActive: meta.isActive, webhookSecret: meta.webhookSecret }),
+
+  setIsActive: (active) => set({ isActive: active }),
 }));
