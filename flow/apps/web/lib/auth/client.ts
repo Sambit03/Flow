@@ -2,4 +2,5 @@
 
 import { createAuthClient } from '@neondatabase/auth/next';
 
-export const authClient = createAuthClient();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const authClient = createAuthClient() as any as ReturnType<typeof createAuthClient>;

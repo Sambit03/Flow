@@ -1,266 +1,173 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { workflows as workflowsApi, type WorkflowSummary } from '@/lib/api';
-import { useAuthStore } from '@/store';
-import { authClient } from '@/lib/auth/client';
-import styles from './dashboard.module.css';
+import { workflows as workflowsApi, executions as executionsApi, type WorkflowSummary, type Execution } from '@/lib/api';
+import { Topbar } from '@/components/layout/Topbar';
+import { StatsRow } from '@/components/dashboard/StatsRow';
+import { WorkflowCard } from '@/components/dashboard/WorkflowCard';
+import { CreateWorkflowModal } from '@/components/dashboard/CreateWorkflowModal';
+import { RecentRunsTable } from '@/components/dashboard/RecentRunsTable';
+import { Button } from '@/components/ui/Button';
+import { useToast } from '@/components/ui/Toast';
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-  });
-}
-
-function WorkflowCard({
-  workflow,
-  onDelete,
-  onToggle,
-}: {
-  workflow: WorkflowSummary;
-  onDelete: (id: string) => void;
-  onToggle: (id: string, active: boolean) => void;
-}) {
-  const [deleting, setDeleting] = useState(false);
-  const [toggling, setToggling] = useState(false);
-  const router = useRouter();
-
-  async function handleDelete(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm(`Delete "${workflow.name}"?`)) return;
-    setDeleting(true);
-    try { await onDelete(workflow.id); }
-    finally { setDeleting(false); }
-  }
-
-  async function handleToggle(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setToggling(true);
-    try { await onToggle(workflow.id, !workflow.isActive); }
-    finally { setToggling(false); }
-  }
-
-  return (
-    <div className={styles.card} onClick={() => router.push(`/workflows/${workflow.id}`)}>
-      <div className={styles.cardTop}>
-        <div className={styles.cardIcon}>
-          {workflow.isActive ? '⚡' : '⏸'}
-        </div>
-        <span className={`${styles.badge} ${workflow.isActive ? styles.badgeActive : styles.badgeInactive}`}>
-          {workflow.isActive ? 'Active' : 'Inactive'}
-        </span>
-      </div>
-
-      <h3 className={styles.cardName}>{workflow.name}</h3>
-      {workflow.description && (
-        <p className={styles.cardDesc}>{workflow.description}</p>
-      )}
-      <p className={styles.cardDate}>Updated {formatDate(workflow.updatedAt)}</p>
-
-      <div className={styles.cardActions}>
-        <Link
-          href={`/workflows/${workflow.id}`}
-          className={styles.btnOpen}
-          onClick={(e) => e.stopPropagation()}
-        >
-          Open Canvas
-        </Link>
-        <Link
-          href={`/workflows/${workflow.id}/runs`}
-          className={styles.btnSecondary}
-          onClick={(e) => e.stopPropagation()}
-        >
-          Runs
-        </Link>
-        <button
-          className={`${styles.btnToggle} ${workflow.isActive ? styles.btnDeactivate : styles.btnActivate}`}
-          onClick={handleToggle}
-          disabled={toggling}
-          title={workflow.isActive ? 'Deactivate' : 'Activate'}
-        >
-          {toggling ? '…' : (workflow.isActive ? '⏸' : '▶')}
-        </button>
-        <button
-          className={styles.btnDelete}
-          onClick={handleDelete}
-          disabled={deleting}
-          title="Delete workflow"
-        >
-          {deleting ? '…' : '🗑'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CreateModal({ onClose, onCreate }: { onClose: () => void; onCreate: (w: WorkflowSummary) => void }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const w = await workflowsApi.create(name.trim(), description.trim() || undefined);
-      onCreate(w);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className={styles.modalOverlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <h2 className={styles.modalTitle}>New Workflow</h2>
-        <form onSubmit={handleSubmit} className={styles.modalForm}>
-          <div className={styles.field}>
-            <label htmlFor="wf-name">Name *</label>
-            <input
-              id="wf-name"
-              type="text"
-              placeholder="My Automation"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoFocus
-            />
-          </div>
-          <div className={styles.field}>
-            <label htmlFor="wf-desc">Description</label>
-            <input
-              id="wf-desc"
-              type="text"
-              placeholder="Optional description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          {error && <div className={styles.error}>{error}</div>}
-          <div className={styles.modalActions}>
-            <button type="button" className={styles.btnCancel} onClick={onClose}>Cancel</button>
-            <button type="submit" className={styles.btnCreate} disabled={loading || !name.trim()}>
-              {loading ? 'Creating…' : 'Create Workflow'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+type WFWithCron = WorkflowSummary & { cronExpression?: string | null };
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, clearAuth } = useAuthStore();
-  const [wfList, setWfList] = useState<WorkflowSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+  const [wfList, setWfList]     = useState<WFWithCron[]>([]);
+  const [allExecs, setAllExecs] = useState<Execution[]>([]);
+  const [loading, setLoading]   = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    workflowsApi.list()
-      .then(setWfList)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    async function load() {
+      try {
+        const wfs = await workflowsApi.list() as WFWithCron[];
+        setWfList(wfs);
+
+        // Fetch executions for all workflows in parallel (for stats + recent runs)
+        const allExecResults = await Promise.allSettled(
+          wfs.map((w) => executionsApi.list(w.id))
+        );
+        const flat: Execution[] = [];
+        allExecResults.forEach((r) => {
+          if (r.status === 'fulfilled') flat.push(...r.value);
+        });
+        flat.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+        setAllExecs(flat);
+      } catch {
+        toast('Failed to load dashboard data', { type: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [toast]);
+
+  const workflowMap = Object.fromEntries(wfList.map((w) => [w.id, w]));
 
   const handleDelete = useCallback(async (id: string) => {
     await workflowsApi.delete(id);
     setWfList((prev) => prev.filter((w) => w.id !== id));
-  }, []);
+    setAllExecs((prev) => prev.filter((e) => e.workflowId !== id));
+    toast('Workflow deleted', { type: 'info' });
+  }, [toast]);
 
   const handleToggle = useCallback(async (id: string, active: boolean) => {
-    const updated = await workflowsApi.update(id, { isActive: active });
-    setWfList((prev) => prev.map((w) => w.id === id ? { ...w, isActive: updated.isActive } : w));
-  }, []);
+    // Optimistic update
+    setWfList((prev) => prev.map((w) => w.id === id ? { ...w, isActive: active } : w));
+    try {
+      await workflowsApi.update(id, { isActive: active });
+      toast(active ? 'Workflow activated' : 'Workflow deactivated', { type: 'success' });
+    } catch {
+      // Roll back
+      setWfList((prev) => prev.map((w) => w.id === id ? { ...w, isActive: !active } : w));
+      toast('Failed to update workflow', { type: 'error' });
+    }
+  }, [toast]);
 
   const handleCreated = useCallback((w: WorkflowSummary) => {
     setShowCreate(false);
     router.push(`/workflows/${w.id}`);
   }, [router]);
 
-  async function handleLogout() {
-    await authClient.signOut();
-    clearAuth();
-    router.push('/login');
-  }
+  const filtered = wfList.filter((w) =>
+    !search || w.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const SkeletonCard = () => (
+    <div className="h-[180px] rounded-lg bg-[#0D1117] border border-[#21262D] skeleton" />
+  );
 
   return (
-    <div className={styles.page}>
-      {/* Sidebar */}
-      <aside className={styles.sidebar}>
-        <Link href="/" className={styles.logo}>⚡ Flow</Link>
-        <nav className={styles.nav}>
-          <span className={`${styles.navItem} ${styles.navActive}`}>
-            <span>📊</span> Dashboard
-          </span>
-        </nav>
-        <div className={styles.sidebarBottom}>
-          <div className={styles.userInfo}>
-            <div className={styles.avatar}>{user?.email?.[0]?.toUpperCase() ?? 'U'}</div>
-            <div className={styles.userDetails}>
-              <span className={styles.userName}>{user?.username || user?.email?.split('@')[0]}</span>
-              <span className={styles.userEmail}>{user?.email}</span>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <Topbar breadcrumbs={[{ label: 'Dashboard' }]} />
+
+      <main className="flex-1 overflow-y-auto p-6 space-y-8">
+        {/* Stats */}
+        {!loading && <StatsRow workflows={wfList} recentExecutions={allExecs} />}
+        {loading && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1,2,3,4].map((i) => <div key={i} className="h-24 rounded-lg skeleton" />)}
+          </div>
+        )}
+
+        {/* Workflow grid */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-[#E6EDF3]">Workflows</h2>
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="Search workflows…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 px-3 text-sm bg-[#0D1117] text-[#E6EDF3] placeholder:text-[#484F58] border border-[#30363D] rounded-md outline-none focus:border-[#388BFD] transition-colors w-48"
+              />
+              <Button size="sm" onClick={() => setShowCreate(true)}>+ New Workflow</Button>
             </div>
           </div>
-          <button className={styles.logoutBtn} onClick={handleLogout} title="Sign out">↪</button>
-        </div>
-      </aside>
 
-      {/* Main */}
-      <main className={styles.main}>
-        <div className={styles.header}>
-          <div>
-            <h1 className={styles.heading}>Workflows</h1>
-            <p className={styles.headingSub}>
-              {wfList.length} workflow{wfList.length !== 1 ? 's' : ''}
-            </p>
-          </div>
-          <button id="new-workflow-btn" className={styles.newBtn} onClick={() => setShowCreate(true)}>
-            <span>+</span> New Workflow
-          </button>
-        </div>
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1,2,3].map((i) => <SkeletonCard key={i} />)}
+            </div>
+          ) : filtered.length === 0 && !search ? (
+            /* Empty state */
+            <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-[#30363D] rounded-lg">
+              <span className="text-5xl mb-4">⚡</span>
+              <h3 className="text-base font-semibold text-[#E6EDF3] mb-2">No workflows yet</h3>
+              <p className="text-sm text-[#8B949E] mb-6 max-w-xs">
+                Build your first automation in minutes — no code required.
+              </p>
+              <Button onClick={() => setShowCreate(true)}>+ Create Workflow</Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((w) => (
+                <WorkflowCard
+                  key={w.id}
+                  workflow={w}
+                  onDelete={handleDelete}
+                  onToggle={handleToggle}
+                />
+              ))}
+              {/* Ghost "New" card */}
+              <button
+                onClick={() => setShowCreate(true)}
+                className="flex items-center justify-center h-[180px] rounded-lg border border-dashed border-[#30363D] text-[#484F58] hover:border-[#388BFD] hover:text-[#388BFD] transition-colors group"
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-3xl group-hover:scale-110 transition-transform">+</span>
+                  <span className="text-sm">New Workflow</span>
+                </div>
+              </button>
+            </div>
+          )}
+        </section>
 
-        {loading ? (
-          <div className={styles.grid}>
-            {[1,2,3].map((i) => (
-              <div key={i} className={`${styles.card} ${styles.skeleton}`} style={{ height: 200 }} />
-            ))}
-          </div>
-        ) : wfList.length === 0 ? (
-          <div className={styles.empty}>
-            <div className={styles.emptyIcon}>🔧</div>
-            <h2>No workflows yet</h2>
-            <p>Create your first automation workflow to get started.</p>
-            <button className={styles.newBtn} onClick={() => setShowCreate(true)}>
-              + Create your first workflow
-            </button>
-          </div>
-        ) : (
-          <div className={styles.grid}>
-            {wfList.map((w) => (
-              <WorkflowCard
-                key={w.id}
-                workflow={w}
-                onDelete={handleDelete}
-                onToggle={handleToggle}
+        {/* Recent Runs */}
+        {!loading && (
+          <section>
+            <h2 className="text-base font-semibold text-[#E6EDF3] mb-4">Recent Runs</h2>
+            <div className="bg-[#0D1117] border border-[#30363D] rounded-lg overflow-hidden">
+              <RecentRunsTable
+                executions={allExecs.slice(0, 10)}
+                workflowMap={workflowMap}
               />
-            ))}
-          </div>
+            </div>
+          </section>
         )}
       </main>
 
-      {showCreate && (
-        <CreateModal onClose={() => setShowCreate(false)} onCreate={handleCreated} />
-      )}
+      <CreateWorkflowModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreate={handleCreated}
+      />
     </div>
   );
 }
