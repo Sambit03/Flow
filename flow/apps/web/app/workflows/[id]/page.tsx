@@ -47,10 +47,11 @@ function toCanvasEdge(e: ApiEdge): CanvasEdge {
 // ── Node palette ──────────────────────────────────────────
 
 const PALETTE_ITEMS = [
-  { type: 'trigger'   as const, label: 'Trigger',   icon: '⚡', color: '#39D353', desc: 'Entry point — webhook, cron, or manual' },
-  { type: 'action'    as const, label: 'Action',    icon: '⚙', color: '#388BFD', desc: 'HTTP request, transform, or log' },
-  { type: 'condition' as const, label: 'Condition', icon: '◈', color: '#D29922', desc: 'Branch based on a field value' },
-  { type: 'delay'     as const, label: 'Delay',     icon: '⏱', color: '#484F58', desc: 'Pause execution for a duration' },
+  { type: 'trigger'   as const, label: 'Trigger',   icon: '⚡', color: '#39D353', desc: 'Entry point — webhook, cron, or manual', defaultConfig: {} },
+  { type: 'action'    as const, label: 'Action',    icon: '⚙', color: '#388BFD', desc: 'HTTP request, transform, or log',        defaultConfig: {} },
+  { type: 'condition' as const, label: 'Condition', icon: '◈', color: '#D29922', desc: 'Branch based on a field value',          defaultConfig: {} },
+  { type: 'delay'     as const, label: 'Delay',     icon: '⏱', color: '#484F58', desc: 'Pause execution for a duration',        defaultConfig: {} },
+  { type: 'action'    as const, label: 'Notify',    icon: '🔔', color: '#388BFD', desc: 'Send an email or Slack message',        defaultConfig: { subtype: 'notify', channel: 'email' } },
 ];
 
 function NodePalette() {
@@ -71,11 +72,11 @@ function NodePalette() {
         Nodes
       </p>
       {PALETTE_ITEMS.map((item) => (
-        <Tooltip key={item.type} content={item.desc} side="right">
+        <Tooltip key={item.label} content={item.desc} side="right">
           <div
             draggable
             onDragStart={(e) => {
-              e.dataTransfer.setData('application/reactflow', item.type);
+              e.dataTransfer.setData('application/reactflow', JSON.stringify({ type: item.type, config: item.defaultConfig }));
               e.dataTransfer.effectAllowed = 'move';
             }}
             style={{
@@ -374,14 +375,16 @@ export default function CanvasPage() {
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const type = e.dataTransfer.getData('application/reactflow') as CanvasNode['data']['type'];
+    const raw = e.dataTransfer.getData('application/reactflow');
+    const { type, config: dropConfig } = (() => { try { return JSON.parse(raw) as { type: CanvasNode['data']['type']; config: Record<string, unknown> }; } catch { return { type: raw as CanvasNode['data']['type'], config: {} }; } })();
     if (!type || !rfInstance.current) return;
     const position = rfInstance.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const label = (dropConfig as any).subtype === 'notify' ? 'Notify' : type.charAt(0).toUpperCase() + type.slice(1);
     setNodes([...nodesRef.current, {
       id: crypto.randomUUID(),
       type,
       position,
-      data: { label: type.charAt(0).toUpperCase() + type.slice(1), type, config: {} },
+      data: { label, type, config: dropConfig },
     }]);
     markDirty();
   }, [setNodes, markDirty]);

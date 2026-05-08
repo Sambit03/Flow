@@ -159,7 +159,13 @@ export function TriggerNode({ data, selected }: NodeProps<FlowNodeData>) {
 /* ── Action Node ─────────────────────────────────────────── */
 export function ActionNode({ data, selected }: NodeProps<FlowNodeData>) {
   const subtype = (data.config?.subtype as string) || 'http_request';
-  const icons: Record<string, string> = { http_request: '🌐', transform: '⚙', log: '📝' };
+  const icons: Record<string, string> = { http_request: '🌐', transform: '⚙', log: '📝', notify: '🔔' };
+
+  const notifyPreview = subtype === 'notify'
+    ? (data.config?.channel === 'slack'
+        ? '💬  Slack'
+        : `✉  ${(data.config?.to as string) || 'No recipient set'}`)
+    : undefined;
 
   return (
     <NodeShell
@@ -167,7 +173,7 @@ export function ActionNode({ data, selected }: NodeProps<FlowNodeData>) {
       headerIcon={icons[subtype] ?? '⚙'}
       headerLabel="Action"
       label={data.label}
-      subLabel={subtype}
+      subLabel={notifyPreview ?? subtype}
       status={data.status}
       selected={selected}
     >

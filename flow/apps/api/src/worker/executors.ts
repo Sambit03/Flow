@@ -1,4 +1,5 @@
-import type { Node, HttpActionConfig, TransformConfig, ConditionConfig } from "@/db/schema/nodes";
+import { Resend } from "resend";
+import type { Node, HttpActionConfig, TransformConfig, ConditionConfig, NotifyConfig } from "@/db/schema/nodes";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -15,9 +16,11 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
 }
 
 function interpolate(template: string, input: Record<string, unknown>): string {
-  return template.replace(/\{\{([\w.]+)\}\}/g, (_, path) =>
-    String(getNestedValue(input, path) ?? ""),
-  );
+  return template.replace(/\{\{([\w.]+)\}\}/g, (_, path) => {
+    // Strip leading "input." so {{input.foo}} and {{foo}} both resolve against the input object
+    const resolvedPath = path.startsWith("input.") ? path.slice(6) : path;
+    return String(getNestedValue(input, resolvedPath) ?? "");
+  });
 }
 
 // ── Executors ─────────────────────────────────────────────────────────────────
@@ -31,19 +34,28 @@ async function executeHttpRequest(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const method = config.method ?? "GET";
+
     let body: string | undefined;
     if (config.body) {
       body = interpolate(config.body, input);
-    } else if (config.method !== "GET" && config.method !== "DELETE") {
+    } else if (method !== "GET" && method !== "DELETE") {
       body = JSON.stringify(input);
     }
 
+    console.log("[HTTP Executor] URL:", config.url);
+    console.log("[HTTP Executor] Method:", method);
+    console.log("[HTTP Executor] Input:", JSON.stringify(input));
+    console.log("[HTTP Executor] Body:", body);
+
     const response = await fetch(config.url, {
-      method: config.method,
+      method,
       headers: { "Content-Type": "application/json", ...(config.headers ?? {}) },
       body,
       signal: controller.signal,
     });
+
+    console.log("[HTTP Executor] Response status:", response.status);
 
     const contentType = response.headers.get("content-type") ?? "";
     const data = contentType.includes("application/json")
@@ -109,6 +121,49 @@ function executeCondition(
   return { ...input, _branch: passes ? "true" : "false" };
 }
 
+// ── Notify executor ──────────────────────────────────────────────────────────
+
+async function executeNotifyAction(
+  config: NotifyConfig,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const sentAt = new Date().toISOString();
+
+  if (!config.channel) throw new Error("Channel is required");
+
+  if (config.channel === "email") {
+    if (!config.to)      throw new Error("To address is required");
+    if (!config.subject) throw new Error("Subject is required");
+    if (!config.body)    throw new Error("Body is required");
+
+    const resend  = new Resend(process.env.RESEND_API_KEY);
+    const from    = process.env.RESEND_FROM || "onboarding@resend.dev";
+    const to      = interpolate(config.to,      input);
+    const subject = interpolate(config.subject, input);
+    const body    = interpolate(config.body,    input);
+
+    const { data, error } = await resend.emails.send({ from, to: [to], subject, html: body });
+    if (error) throw new Error("Email failed: " + error.message);
+    return { channel: "email", emailId: data?.id, to, subject, sentAt };
+  }
+
+  if (config.channel === "slack") {
+    if (!config.webhookUrl) throw new Error("Slack webhook URL is required");
+    if (!config.message)    throw new Error("Message is required");
+
+    const message = interpolate(config.message, input);
+    const res = await fetch(config.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message, username: "Flow", icon_emoji: config.emoji || ":zap:" }),
+    });
+    if (!res.ok) throw new Error("Slack failed: " + res.statusText);
+    return { channel: "slack", sent: true, message, sentAt };
+  }
+
+  throw new Error("Unknown notify channel: " + (config as any).channel);
+}
+
 // ── Main dispatcher ───────────────────────────────────────────────────────────
 
 export async function executeNode(
@@ -122,7 +177,7 @@ export async function executeNode(
       return input;
 
     case "action": {
-      const subtype = config.subtype as string;
+      const subtype = (config.subtype as string) || "http_request";
       if (subtype === "http_request") {
         return executeHttpRequest(config as unknown as HttpActionConfig, input);
       }
@@ -132,6 +187,9 @@ export async function executeNode(
       if (subtype === "log") {
         console.log(`[Flow Log] ${node.label}:`, JSON.stringify(input, null, 2));
         return input;
+      }
+      if (subtype === "notify") {
+        return executeNotifyAction(config as unknown as NotifyConfig, input);
       }
       return input;
     }

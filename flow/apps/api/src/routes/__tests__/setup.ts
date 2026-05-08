@@ -239,7 +239,7 @@ export const mockExecution = {
   totalSteps: 1,
   completedSteps: 1,
   startedAt: new Date(),
-  endedAt: new Date(),
+  finishedAt: new Date(),
   createdAt: new Date(),
   stepLogs: [],
 };

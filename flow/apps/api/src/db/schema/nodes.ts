@@ -13,7 +13,7 @@ import { workflows } from "./workflows";
 // All valid node types — enforced at app level, stored as text for flexibility
 export type NodeType = "trigger" | "action" | "condition" | "delay";
 export type TriggerSub = "webhook" | "cron" | "manual";
-export type ActionSub = "http_request" | "transform" | "log";
+export type ActionSub = "http_request" | "transform" | "log" | "notify";
 
 // Config shape per node type (for TypeScript — not enforced in DB)
 export interface TriggerConfig {
@@ -51,12 +51,31 @@ export interface DelayConfig {
   durationMs: number; // max: 86400000 (24h)
 }
 
+export interface NotifyEmailConfig {
+  subtype: "notify";
+  channel: "email";
+  to: string;
+  subject: string;
+  body: string;
+}
+
+export interface NotifySlackConfig {
+  subtype: "notify";
+  channel: "slack";
+  webhookUrl: string;
+  message: string;
+  emoji?: string;
+}
+
+export type NotifyConfig = NotifyEmailConfig | NotifySlackConfig;
+
 export type NodeConfig =
   | TriggerConfig
   | HttpActionConfig
   | TransformConfig
   | ConditionConfig
-  | DelayConfig;
+  | DelayConfig
+  | NotifyConfig;
 
 export const nodes = pgTable(
   "nodes",

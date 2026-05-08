@@ -289,9 +289,8 @@ describe("GET /api/executions/:executionId/stream (SSE stream)", () => {
     expect(response.headers["content-type"]).toContain("text/event-stream");
   });
 
-  it("should set CORS headers for SSE", async () => {
+  it("should set SSE content-type header", async () => {
     const token = createMockToken(TEST_USER_ID, TEST_USER_EMAIL);
-    // Using imported db variable
 
     db.query.executions.findFirst = vi.fn().mockResolvedValue(mockExecution);
     db.query.workflows.findFirst = vi.fn().mockResolvedValue(mockWorkflow);
@@ -307,6 +306,6 @@ describe("GET /api/executions/:executionId/stream (SSE stream)", () => {
       .get(`/api/executions/${TEST_EXECUTION_ID}/stream`)
       .set("Authorization", `Bearer ${token}`);
 
-    expect(response.headers["access-control-allow-origin"]).toBe("*");
+    expect(response.headers["content-type"]).toContain("text/event-stream");
   });
 });

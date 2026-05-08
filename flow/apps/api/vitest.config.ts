@@ -7,6 +7,7 @@ export default defineConfig({
     globals: true,
     setupFiles: [],
     testTimeout: 10000,
+    exclude: ["**/node_modules/**", "**/dist/**"],
   },
   resolve: {
     alias: {

@@ -6,7 +6,7 @@ import { useCanvasStore } from '@/store';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 const TRIGGER_SUBTYPES = ['manual', 'webhook', 'cron'] as const;
-const ACTION_SUBTYPES  = ['http_request', 'transform', 'log'] as const;
+const ACTION_SUBTYPES  = ['http_request', 'transform', 'log', 'notify'] as const;
 const HTTP_METHODS     = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 const OPERATORS        = ['eq', 'neq', 'contains', 'gt', 'lt', 'exists'] as const;
 const OPERATOR_LABELS: Record<string, string> = {
@@ -132,7 +132,9 @@ function TriggerConfig({ config, onChange }: { config: Record<string, unknown>; 
 
 function ActionConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (c: Record<string, unknown>) => void }) {
   const subtype = (config.subtype as string) || 'http_request';
-  const set = (key: string, val: unknown) => onChange({ ...config, [key]: val });
+  const method = (config.method as string) || 'GET';
+  // Always include subtype+method so defaults are persisted even if the user never touches those dropdowns
+  const set = (key: string, val: unknown) => onChange({ ...config, subtype, method, [key]: val });
 
   return (
     <>
@@ -169,6 +171,55 @@ function ActionConfig({ config, onChange }: { config: Record<string, unknown>; o
         <Field label="Message Template">
           <input style={inputStyle} placeholder="Step completed: {{input.id}}" value={(config.message as string) || ''} onChange={(e) => set('message', e.target.value)} />
         </Field>
+      )}
+
+      {subtype === 'notify' && <NotifyConfig config={config} onChange={onChange} />}
+    </>
+  );
+}
+
+function NotifyConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (c: Record<string, unknown>) => void }) {
+  const channel = (config.channel as string) || 'email';
+  const set = (key: string, val: unknown) => onChange({ ...config, subtype: 'notify', channel, [key]: val });
+  const setChannel = (val: string) => onChange({ subtype: 'notify', channel: val });
+
+  return (
+    <>
+      <Field label="Channel">
+        <select style={selectStyle} value={channel} onChange={(e) => setChannel(e.target.value)}>
+          <option value="email">Email</option>
+          <option value="slack">Slack</option>
+        </select>
+      </Field>
+
+      {channel === 'email' && (
+        <>
+          <Field label="To">
+            <input style={inputStyle} placeholder="{{input.email}}" value={(config.to as string) || ''} onChange={(e) => set('to', e.target.value)} />
+            <span style={hintStyle}>Supports {'{{input.field}}'}</span>
+          </Field>
+          <Field label="Subject">
+            <input style={inputStyle} placeholder="Hello, {{input.name}}!" value={(config.subject as string) || ''} onChange={(e) => set('subject', e.target.value)} />
+          </Field>
+          <Field label="Body">
+            <textarea style={{ ...textareaStyle, minHeight: 100 }} placeholder={'Hi {{input.name}}, your workflow just ran.'} value={(config.body as string) || ''} onChange={(e) => set('body', e.target.value)} rows={5} />
+            <span style={hintStyle}>Plain text or HTML</span>
+          </Field>
+        </>
+      )}
+
+      {channel === 'slack' && (
+        <>
+          <Field label="Slack Webhook URL">
+            <input style={inputStyle} placeholder="https://hooks.slack.com/services/..." value={(config.webhookUrl as string) || ''} onChange={(e) => set('webhookUrl', e.target.value)} />
+          </Field>
+          <Field label="Message">
+            <textarea style={{ ...textareaStyle, minHeight: 80 }} placeholder={'🚨 {{input.name}} triggered a workflow'} value={(config.message as string) || ''} onChange={(e) => set('message', e.target.value)} rows={4} />
+          </Field>
+          <Field label="Emoji (optional)">
+            <input style={inputStyle} placeholder=":zap:" value={(config.emoji as string) || ''} onChange={(e) => set('emoji', e.target.value)} />
+          </Field>
+        </>
       )}
     </>
   );

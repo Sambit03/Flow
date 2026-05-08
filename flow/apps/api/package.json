@@ -28,6 +28,7 @@
     "next": "16.2.4",
     "node-cron": "^4.2.1",
     "pg": "^8.11.0",
+    "resend": "^6.12.3",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
