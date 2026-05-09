@@ -11,12 +11,13 @@ const redisSharedOpts = {
   retryStrategy: (times: number) => Math.min(times * 50, 2000),
 };
 
-// Heroku Redis provides REDIS_TLS_URL (rediss://) or REDIS_URL (redis://).
-// ioredis automatically enables TLS for rediss:// URLs.
 const redisUrl = process.env.REDIS_TLS_URL || process.env.REDIS_URL;
 
 export const redis = redisUrl
-  ? new Redis(redisUrl, redisSharedOpts)
+  ? new Redis(redisUrl, {
+      ...redisSharedOpts,
+      tls: redisUrl.startsWith("rediss://") ? {} : undefined,
+    })
   : new Redis({
       host: process.env.REDIS_HOST || "localhost",
       port: parseInt(process.env.REDIS_PORT || "6379"),
