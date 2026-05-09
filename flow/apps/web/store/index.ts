@@ -56,6 +56,17 @@ export type CanvasEdge = {
   data?: Record<string, unknown>;
 };
 
+export interface ConsoleEntry {
+  id: string;
+  level: 'log' | 'warning' | 'error';
+  timestamp: number;
+  nodeId: string;
+  nodeLabel: string;
+  message: string;
+  input?: unknown;
+  output?: unknown;
+}
+
 interface CanvasState {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
@@ -81,6 +92,16 @@ interface CanvasState {
   clearNodeStatuses: () => void;
   setWorkflowMeta: (meta: { workflowId: string; isActive: boolean; webhookSecret: string }) => void;
   setIsActive: (active: boolean) => void;
+
+  consoleLogs: ConsoleEntry[];
+  isConsoleOpen: boolean;
+  consoleFilter: 'all' | 'error' | 'warning' | 'log';
+  unreadErrorCount: number;
+  addConsoleEntry: (entry: Omit<ConsoleEntry, 'id' | 'timestamp'>) => void;
+  clearConsoleLogs: () => void;
+  openConsole: () => void;
+  closeConsole: () => void;
+  setConsoleFilter: (filter: CanvasState['consoleFilter']) => void;
 }
 
 export const useCanvasStore = create<CanvasState>()((set) => ({
@@ -93,6 +114,10 @@ export const useCanvasStore = create<CanvasState>()((set) => ({
   workflowId: null,
   isActive: false,
   webhookSecret: null,
+  consoleLogs: [],
+  isConsoleOpen: false,
+  consoleFilter: 'all',
+  unreadErrorCount: 0,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
@@ -140,4 +165,20 @@ export const useCanvasStore = create<CanvasState>()((set) => ({
     set({ workflowId: meta.workflowId, isActive: meta.isActive, webhookSecret: meta.webhookSecret }),
 
   setIsActive: (active) => set({ isActive: active }),
+
+  addConsoleEntry: (entry) =>
+    set((state) => {
+      const newEntry: ConsoleEntry = { ...entry, id: crypto.randomUUID(), timestamp: Date.now() };
+      const consoleLogs = [...state.consoleLogs, newEntry].slice(-200);
+      const unreadErrorCount =
+        entry.level === 'error' && !state.isConsoleOpen
+          ? state.unreadErrorCount + 1
+          : state.unreadErrorCount;
+      return { consoleLogs, unreadErrorCount };
+    }),
+
+  clearConsoleLogs: () => set({ consoleLogs: [], unreadErrorCount: 0 }),
+  openConsole: () => set({ isConsoleOpen: true, unreadErrorCount: 0 }),
+  closeConsole: () => set({ isConsoleOpen: false }),
+  setConsoleFilter: (filter) => set({ consoleFilter: filter }),
 }));

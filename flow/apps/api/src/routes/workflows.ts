@@ -279,12 +279,13 @@ router.post("/:id/execute", async (req: Request, res: Response) => {
       );
     }
 
-    // Queue the execution job
+    // Queue the execution job — use executionId as the BullMQ jobId so we can
+    // look it up by ID later (e.g., to remove a queued job on cancel).
     await workflowQueue.add(`execution-${execution.id}`, {
       executionId: execution.id,
       workflowId: id,
       payload: payload || {},
-    });
+    }, { jobId: execution.id });
 
     res
       .status(201)

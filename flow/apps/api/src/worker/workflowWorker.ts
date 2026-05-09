@@ -60,7 +60,7 @@ async function processWorkflow(job: Job<WorkflowJobData>): Promise<void> {
     { nodeId: triggerNode.id, input: payload ?? {} },
   ];
 
-  let finalStatus: "success" | "failed" = "success";
+  let finalStatus: "success" | "failed" | "cancelled" = "success";
   let errorMsg: string | undefined;
 
   while (queue.length > 0) {
@@ -99,6 +99,27 @@ async function processWorkflow(job: Job<WorkflowJobData>): Promise<void> {
         .update(executions)
         .set({ completedSteps: sql`${executions.completedSteps} + 1` })
         .where(eq(executions.id, executionId));
+
+      // Check for a cancellation signal written by the cancel endpoint
+      const current = await db
+        .select({ status: executions.status })
+        .from(executions)
+        .where(eq(executions.id, executionId))
+        .then((rows) => rows[0]);
+
+      if (current?.status === "cancelled") {
+        await db
+          .update(stepLogs)
+          .set({ status: "skipped" })
+          .where(
+            and(
+              eq(stepLogs.executionId, executionId),
+              eq(stepLogs.status, "pending"),
+            ),
+          );
+        finalStatus = "cancelled";
+        break;
+      }
 
       // Enqueue next nodes (respect condition branches)
       const outEdges = adjacency.get(nodeId) ?? [];

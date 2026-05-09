@@ -13,6 +13,7 @@ import { isValidUUID } from "@/lib/validateUUID";
 import { db } from "@/db";
 import { workflows, executions, stepLogs } from "@/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
+import { workflowQueue } from "@/queue";
 
 const router = Router();
 
@@ -151,6 +152,80 @@ router.get(
     } catch (error) {
       console.error("Error fetching step logs:", error);
       res.status(500).json({ error: "Failed to fetch step logs" });
+    }
+  },
+);
+
+/**
+ * POST /api/workflows/:workflowId/executions/:executionId/cancel
+ * Cancel a pending or running execution
+ */
+router.post(
+  "/:workflowId/executions/:executionId/cancel",
+  async (req: Request, res: Response) => {
+    try {
+      const { userId } = (req as any).user;
+      const { workflowId, executionId } = req.params;
+
+      if (!isValidUUID(workflowId) || !isValidUUID(executionId)) {
+        return res.status(400).json({ error: "Invalid ID format" });
+      }
+
+      const workflow = await db.query.workflows.findFirst({
+        where: and(eq(workflows.id, workflowId), eq(workflows.userId, userId)),
+      });
+
+      if (!workflow) {
+        return res.status(404).json({ error: "Workflow not found" });
+      }
+
+      const execution = await db.query.executions.findFirst({
+        where: and(
+          eq(executions.id, executionId),
+          eq(executions.workflowId, workflowId),
+        ),
+      });
+
+      if (!execution) {
+        return res.status(404).json({ error: "Execution not found" });
+      }
+
+      if (!["pending", "running"].includes(execution.status)) {
+        return res.status(400).json({
+          error: `Cannot cancel execution with status "${execution.status}"`,
+        });
+      }
+
+      // Remove from BullMQ if it is still waiting in the queue
+      const job = await workflowQueue.getJob(executionId);
+      if (job) {
+        const state = await job.getState();
+        if (state === "waiting" || state === "delayed") {
+          await job.remove();
+        }
+      }
+
+      // Signal cancellation — the worker checks this after each step
+      await db
+        .update(executions)
+        .set({ status: "cancelled", finishedAt: new Date() })
+        .where(eq(executions.id, executionId));
+
+      // Mark all still-pending step logs as skipped
+      await db
+        .update(stepLogs)
+        .set({ status: "skipped" })
+        .where(
+          and(
+            eq(stepLogs.executionId, executionId),
+            eq(stepLogs.status, "pending"),
+          ),
+        );
+
+      res.json({ message: "Execution cancelled" });
+    } catch (error) {
+      console.error("Error cancelling execution:", error);
+      res.status(500).json({ error: "Failed to cancel execution" });
     }
   },
 );

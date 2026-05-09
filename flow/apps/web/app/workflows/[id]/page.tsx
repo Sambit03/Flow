@@ -21,8 +21,9 @@ import 'reactflow/dist/style.css';
 import { nodeTypes } from '@/components/nodes/FlowNodes';
 import NodeSidebar from '@/components/NodeSidebar/NodeSidebar';
 import { LiveRunPanel } from '@/components/canvas/LiveRunPanel';
+import { ConsolePanel } from '@/components/canvas/ConsolePanel';
 import { useCanvasStore, type CanvasNode, type CanvasEdge } from '@/store';
-import { workflows as workflowsApi, type ApiNode, type ApiEdge } from '@/lib/api';
+import { workflows as workflowsApi, executions as executionsApi, type ApiNode, type ApiEdge } from '@/lib/api';
 import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { useToast } from '@/components/ui/Toast';
 import { Badge } from '@/components/ui/Badge';
@@ -124,18 +125,24 @@ interface CanvasTopbarProps {
   isActive: boolean;
   saving: boolean;
   starting: boolean;
+  stopping: boolean;
   toggling: boolean;
   isStreaming: boolean;
-  lastResult: 'success' | 'failed' | null;
+  lastResult: 'success' | 'failed' | 'cancelled' | null;
+  isConsoleOpen: boolean;
+  unreadErrorCount: number;
   onSave: () => void;
   onRun: () => void;
+  onStop: () => void;
   onToggleActive: () => void;
+  onToggleConsole: () => void;
 }
 
 function CanvasTopbar({
   workflowId, workflowName, onNameChange, onNameBlur, isDirty,
-  isActive, saving, starting, toggling, isStreaming, lastResult,
-  onSave, onRun, onToggleActive,
+  isActive, saving, starting, stopping, toggling, isStreaming, lastResult,
+  isConsoleOpen, unreadErrorCount,
+  onSave, onRun, onStop, onToggleActive, onToggleConsole,
 }: CanvasTopbarProps) {
   const saveLabel = saving ? 'Saving…' : isDirty ? 'Save ●' : 'Saved';
   const saveColor = isDirty ? '#388BFD' : '#484F58';
@@ -192,6 +199,7 @@ function CanvasTopbar({
       {isStreaming && <Badge variant="running" pulse>Running</Badge>}
       {!isStreaming && lastResult === 'success' && <Badge variant="success">✓ Done</Badge>}
       {!isStreaming && lastResult === 'failed' && <Badge variant="failed">✕ Failed</Badge>}
+      {!isStreaming && lastResult === 'cancelled' && <Badge variant="failed">◼ Cancelled</Badge>}
 
       {/* Active toggle */}
       <Tooltip content={isActive ? 'Deactivate workflow' : 'Activate workflow'}>
@@ -219,26 +227,97 @@ function CanvasTopbar({
         </button>
       </Tooltip>
 
-      {/* Run button */}
-      <button
-        onClick={onRun}
-        disabled={starting || isStreaming || !isActive}
-        title={!isActive ? 'Activate the workflow to run it' : undefined}
-        style={{
-          height: 30,
-          padding: '0 14px',
-          borderRadius: 6,
-          border: 'none',
-          background: starting || isStreaming ? '#21262D' : '#388BFD',
-          color: starting || isStreaming ? '#484F58' : 'white',
-          fontSize: 12,
-          fontWeight: 500,
-          cursor: starting || isStreaming || !isActive ? 'not-allowed' : 'pointer',
-          transition: 'all 0.12s',
-        }}
-      >
-        {starting ? '…' : '▶ Run'}
-      </button>
+      {/* Console toggle */}
+      <Tooltip content="Toggle console">
+        <button
+          onClick={onToggleConsole}
+          style={{
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: 30,
+            width: 30,
+            borderRadius: 6,
+            border: isConsoleOpen ? '1px solid rgba(56,139,253,0.4)' : '1px solid #30363D',
+            background: isConsoleOpen ? 'rgba(56,139,253,0.1)' : 'transparent',
+            color: isConsoleOpen ? '#388BFD' : '#8B949E',
+            fontSize: 13,
+            cursor: 'pointer',
+            transition: 'all 0.12s',
+          }}
+        >
+          ⌨
+          {!isConsoleOpen && unreadErrorCount > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: -4,
+                right: -4,
+                background: '#F85149',
+                color: 'white',
+                fontSize: 9,
+                fontWeight: 700,
+                borderRadius: '50%',
+                width: 14,
+                height: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'IBM Plex Mono, monospace',
+                pointerEvents: 'none',
+              }}
+            >
+              {unreadErrorCount > 9 ? '9+' : unreadErrorCount}
+            </span>
+          )}
+        </button>
+      </Tooltip>
+
+      {/* Stop button (only while streaming) */}
+      {isStreaming && (
+        <button
+          onClick={onStop}
+          disabled={stopping}
+          style={{
+            height: 30,
+            padding: '0 14px',
+            borderRadius: 6,
+            border: 'none',
+            background: stopping ? '#21262D' : '#F85149',
+            color: stopping ? '#484F58' : 'white',
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: stopping ? 'not-allowed' : 'pointer',
+            transition: 'all 0.12s',
+          }}
+        >
+          {stopping ? '…' : '◼ Stop'}
+        </button>
+      )}
+
+      {/* Run button (hidden while streaming) */}
+      {!isStreaming && (
+        <button
+          onClick={onRun}
+          disabled={starting || !isActive}
+          title={!isActive ? 'Activate the workflow to run it' : undefined}
+          style={{
+            height: 30,
+            padding: '0 14px',
+            borderRadius: 6,
+            border: 'none',
+            background: starting ? '#21262D' : '#388BFD',
+            color: starting ? '#484F58' : 'white',
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: starting || !isActive ? 'not-allowed' : 'pointer',
+            transition: 'all 0.12s',
+          }}
+        >
+          {starting ? '…' : '▶ Run'}
+        </button>
+      )}
 
       {/* Save button */}
       <button
@@ -284,8 +363,12 @@ export default function CanvasPage() {
   const markClean       = useCanvasStore((s) => s.markClean);
   const selectNode      = useCanvasStore((s) => s.selectNode);
   const setActiveExec   = useCanvasStore((s) => s.setActiveExecution);
-  const setWorkflowMeta = useCanvasStore((s) => s.setWorkflowMeta);
-  const setIsActive     = useCanvasStore((s) => s.setIsActive);
+  const setWorkflowMeta  = useCanvasStore((s) => s.setWorkflowMeta);
+  const setIsActive      = useCanvasStore((s) => s.setIsActive);
+  const isConsoleOpen    = useCanvasStore((s) => s.isConsoleOpen);
+  const unreadErrorCount = useCanvasStore((s) => s.unreadErrorCount);
+  const openConsole      = useCanvasStore((s) => s.openConsole);
+  const closeConsole     = useCanvasStore((s) => s.closeConsole);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -298,6 +381,7 @@ export default function CanvasPage() {
   const [workflowName, setWorkflowName] = useState('');
   const [saving,   setSaving]   = useState(false);
   const [starting, setStarting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [loading,  setLoading]  = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -337,6 +421,8 @@ export default function CanvasPage() {
       markClean();
       setActiveExec(null);
       useCanvasStore.getState().clearNodeStatuses();
+      useCanvasStore.getState().clearConsoleLogs();
+      useCanvasStore.getState().closeConsole();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -409,6 +495,20 @@ export default function CanvasPage() {
       toast('Failed to save workflow', { type: 'error' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ── Stop (cancel active execution) ──────────────────────
+
+  async function handleStop() {
+    if (!activeExecId) return;
+    setStopping(true);
+    try {
+      await executionsApi.cancel(id, activeExecId);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to cancel', { type: 'error' });
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -487,12 +587,17 @@ export default function CanvasPage() {
         isActive={isActive}
         saving={saving}
         starting={starting}
+        stopping={stopping}
         toggling={toggling}
         isStreaming={isStreaming}
         lastResult={lastResult}
+        isConsoleOpen={isConsoleOpen}
+        unreadErrorCount={unreadErrorCount}
         onSave={handleSave}
         onRun={handleRun}
+        onStop={handleStop}
         onToggleActive={handleToggleActive}
+        onToggleConsole={() => isConsoleOpen ? closeConsole() : openConsole()}
       />
 
       {/* Main canvas area */}
@@ -549,6 +654,9 @@ export default function CanvasPage() {
           onClose={() => setLiveOpen(false)}
         />
       )}
+
+      {/* Console panel */}
+      <ConsolePanel />
     </div>
   );
 }

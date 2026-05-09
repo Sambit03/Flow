@@ -148,7 +148,7 @@ export const workflows = {
 export interface Execution {
   id: string;
   workflowId: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'timed_out';
   trigger: 'webhook' | 'cron' | 'manual';
   startedAt: string;
   finishedAt?: string;
@@ -180,4 +180,9 @@ export const executions = {
 
   logs: (workflowId: string, executionId: string) =>
     request<StepLog[]>(`/api/workflows/${workflowId}/executions/${executionId}/logs`),
+
+  cancel: (workflowId: string, executionId: string) =>
+    request<{ message: string }>(`/api/workflows/${workflowId}/executions/${executionId}/cancel`, {
+      method: 'POST',
+    }),
 };

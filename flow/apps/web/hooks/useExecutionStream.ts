@@ -6,13 +6,15 @@ import { authClient } from '@/lib/auth/client';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-export type ExecutionResult = 'success' | 'failed' | null;
+export type ExecutionResult = 'success' | 'failed' | 'cancelled' | null;
 
 export function useExecutionStream() {
   const activeExecutionId  = useCanvasStore((s) => s.activeExecutionId);
   const setNodeStatus      = useCanvasStore((s) => s.setNodeStatus);
   const clearNodeStatuses  = useCanvasStore((s) => s.clearNodeStatuses);
   const setActiveExecution = useCanvasStore((s) => s.setActiveExecution);
+  const addConsoleEntry    = useCanvasStore((s) => s.addConsoleEntry);
+  const openConsole        = useCanvasStore((s) => s.openConsole);
 
   const [isStreaming,  setIsStreaming]  = useState(false);
   const [lastResult,   setLastResult]   = useState<ExecutionResult>(null);
@@ -75,14 +77,41 @@ export function useExecutionStream() {
 
                 if (ev.type === 'step_update' && ev.nodeId) {
                   setNodeStatus(ev.nodeId, ev.status);
+
+                  const nodeLabel =
+                    useCanvasStore.getState().nodes.find((n) => n.id === ev.nodeId)?.data.label
+                    ?? ev.nodeId;
+
+                  if (ev.status === 'failed') {
+                    addConsoleEntry({
+                      level: 'error',
+                      nodeId: ev.nodeId,
+                      nodeLabel,
+                      message: (ev.error as string | undefined) ?? 'Step failed',
+                      input: ev.input as unknown,
+                      output: ev.output as unknown,
+                    });
+                    openConsole();
+                  } else if (ev.status === 'running' || ev.status === 'success') {
+                    addConsoleEntry({
+                      level: 'log',
+                      nodeId: ev.nodeId,
+                      nodeLabel,
+                      message: ev.status === 'running' ? 'Step started' : 'Step completed',
+                      input: ev.input as unknown,
+                      output: ev.output as unknown,
+                    });
+                  }
                 }
 
                 if (ev.type === 'execution_completed') {
                   const result: ExecutionResult =
-                    ev.status === 'success' ? 'success' : 'failed';
+                    ev.status === 'success' ? 'success' :
+                    ev.status === 'cancelled' ? 'cancelled' : 'failed';
                   setLastResult(result);
                   setIsStreaming(false);
                   setActiveExecution(null);
+                  if (result === 'failed') openConsole();
                   return;
                 }
               } catch {
