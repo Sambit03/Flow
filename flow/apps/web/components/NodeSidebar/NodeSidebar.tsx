@@ -250,18 +250,30 @@ function ConditionConfig({ config, onChange }: { config: Record<string, unknown>
 
 function DelayConfig({ config, onChange }: { config: Record<string, unknown>; onChange: (c: Record<string, unknown>) => void }) {
   const ms = Number(config.durationMs) || 1000;
-  const seconds = ms / 1000;
-  const label = seconds < 1 ? `${ms}ms` : `${seconds}s`;
+  const [localValue, setLocalValue] = useState(String(ms / 1000));
+
+  useEffect(() => {
+    setLocalValue(String(Number(config.durationMs) / 1000 || 1));
+  }, [config.durationMs]);
+
+  const displayMs = Number(localValue) * 1000;
+  const label = displayMs < 1000 ? `${displayMs}ms` : `${Number(localValue)}s`;
 
   return (
     <Field label="Duration (seconds)">
       <input
         style={inputStyle}
-        type="number"
-        min={0}
-        step={0.5}
-        value={seconds}
-        onChange={(e) => onChange({ ...config, durationMs: Number(e.target.value) * 1000 })}
+        type="text"
+        inputMode="numeric"
+        value={localValue}
+        onChange={(e) => {
+          const raw = e.target.value.replace(/[^0-9.]/g, '');
+          setLocalValue(raw);
+          const num = Number(raw);
+          if (!isNaN(num) && num > 0) {
+            onChange({ ...config, durationMs: num * 1000 });
+          }
+        }}
       />
       <span style={hintStyle}>= {label}</span>
     </Field>
