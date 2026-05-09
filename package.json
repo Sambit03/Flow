@@ -1,0 +1,12 @@
+{
+  "name": "flow-capstone",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "heroku-postbuild": "cd flow && npm install && npm run build -w @flow/types && npm run build -w api",
+    "start": "node flow/apps/api/dist/index.js"
+  }
+}

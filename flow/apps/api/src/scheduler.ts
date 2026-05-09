@@ -1,6 +1,6 @@
 import * as cron from "node-cron";
 import type { ScheduledTask } from "node-cron";
-import { eq, and, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { workflows, nodes, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
@@ -115,9 +115,34 @@ export function syncWorkflowSchedule(
   }
 }
 
+/**
+ * Mark any execution that has been stuck in "running" for more than 30 minutes
+ * as failed. This handles the case where the worker process crashed mid-execution
+ * and left the execution record in a terminal-less state.
+ */
+async function cleanStaleExecutions(): Promise<void> {
+  const staleThreshold = new Date(Date.now() - 30 * 60 * 1000); // 30 min ago
+  const result = await db
+    .update(executions)
+    .set({ status: "failed", error: "Execution timed out (worker restart)", finishedAt: new Date() })
+    .where(
+      and(
+        eq(executions.status, "running"),
+        lt(executions.startedAt, staleThreshold),
+      ),
+    )
+    .returning({ id: executions.id });
+
+  if (result.length > 0) {
+    console.log(`[Scheduler] Marked ${result.length} stale execution(s) as failed`);
+  }
+}
+
 /** Load all active cron workflows from DB and schedule them. Call once on startup. */
 export async function startScheduler(): Promise<void> {
   console.log("[Scheduler] Starting…");
+
+  await cleanStaleExecutions();
 
   const activeWorkflows = await db.query.workflows.findMany({
     where: and(

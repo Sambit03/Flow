@@ -165,7 +165,8 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { userId } = (req as any).user;
-      const { workflowId, executionId } = req.params;
+      const workflowId = req.params.workflowId as string;
+      const executionId = req.params.executionId as string;
 
       if (!isValidUUID(workflowId) || !isValidUUID(executionId)) {
         return res.status(400).json({ error: "Invalid ID format" });

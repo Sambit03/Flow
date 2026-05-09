@@ -16,8 +16,10 @@ async function processWorkflow(job: Job<WorkflowJobData>): Promise<void> {
   const { executionId, workflowId, payload } = job.data;
 
   // ── 1. Load workflow graph ────────────────────────────────────────────────
+  // isNull(workflows.deletedAt) prevents jobs queued before a soft-delete
+  // from executing after the user deletes the workflow.
   const workflow = await db.query.workflows.findFirst({
-    where: eq(workflows.id, workflowId),
+    where: and(eq(workflows.id, workflowId), isNull(workflows.deletedAt)),
     with: {
       nodes: {
         where: isNull(nodes.deletedAt),
@@ -28,7 +30,12 @@ async function processWorkflow(job: Job<WorkflowJobData>): Promise<void> {
   });
 
   if (!workflow) {
-    throw new Error(`Workflow ${workflowId} not found`);
+    // Mark as failed rather than throwing — avoids BullMQ retrying a deleted workflow
+    await db
+      .update(executions)
+      .set({ status: "failed", error: "Workflow not found or deleted", finishedAt: new Date() })
+      .where(eq(executions.id, executionId));
+    return;
   }
 
   // ── 2. Mark execution running ─────────────────────────────────────────────

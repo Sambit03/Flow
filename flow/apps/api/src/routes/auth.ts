@@ -9,12 +9,20 @@
  */
 
 import { Router, Request, Response } from "express";
-import { neonAuthMiddleware } from "@/auth/neon-auth";
+import { neonAuthMiddleware, invalidateSession } from "@/auth/neon-auth";
 import { db } from "@/db";
 import { profiles } from "@/db/schema/users";
 import { eq } from "drizzle-orm";
 
 const router = Router();
+
+// POST /auth/logout — invalidates the server-side session cache immediately
+// so the token cannot be reused even within the JWT TTL window.
+router.post("/logout", neonAuthMiddleware, (req: Request, res: Response) => {
+  const token = (req as any).user?.token as string | undefined;
+  if (token) invalidateSession(token);
+  res.json({ message: "Logged out" });
+});
 
 router.get("/me", neonAuthMiddleware, async (req: Request, res: Response) => {
   try {

@@ -87,6 +87,11 @@ function pruneCache() {
   }
 }
 
+/** Remove a token from the in-memory cache immediately on logout. */
+export function invalidateSession(token: string): void {
+  sessionCache.delete(token);
+}
+
 export async function neonAuthMiddleware(
   req: Request,
   res: Response,

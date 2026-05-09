@@ -33,8 +33,19 @@ router.get("/", async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user;
 
+    // Explicit column projection — webhookSecret is excluded from the list
+    // response (it is only returned on the single-workflow detail endpoint)
     const userWorkflows = await db
-      .select()
+      .select({
+        id: workflows.id,
+        userId: workflows.userId,
+        name: workflows.name,
+        description: workflows.description,
+        isActive: workflows.isActive,
+        cronExpression: workflows.cronExpression,
+        createdAt: workflows.createdAt,
+        updatedAt: workflows.updatedAt,
+      })
       .from(workflows)
       .where(and(eq(workflows.userId, userId), isNull(workflows.deletedAt)))
       .orderBy(desc(workflows.createdAt));

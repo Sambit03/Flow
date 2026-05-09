@@ -1,5 +1,7 @@
 ﻿import express, { Express, Request, Response, NextFunction } from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 
 // Import route handlers
 import authRoutes from "@/routes/auth";
@@ -16,12 +18,23 @@ import { workflowWorker } from "@/worker/workflowWorker";
 import { startScheduler } from "@/scheduler";
 
 const app: Express = express();
-const port = process.env.API_PORT || 5000;
+// process.env.PORT is set dynamically by Heroku; API_PORT is the local dev default
+const port = process.env.PORT || process.env.API_PORT || 5000;
 const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:3000";
 
 // ─────────────────────────────────────────────────────────────
 // Middleware Setup
 // ─────────────────────────────────────────────────────────────
+
+app.use(helmet({
+  // SSE streams need this header absent so browsers don't buffer the response
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Webhook route gets its own tight body limit — must be mounted BEFORE the
+// global json() parser so the 64 KB cap takes effect (body-parser skips
+// re-parsing once req.body is already populated).
+app.use("/api/webhooks", express.json({ limit: "64kb" }));
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
@@ -35,6 +48,28 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
+
+// ── Rate limiting ──────────────────────────────────────────────────────────────
+
+// Global limiter — uses RATE_LIMIT_* env vars (defined in .env.local)
+const globalLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000"), // 15 min default
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100"),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later." },
+});
+
+// Tighter limiter for auth endpoints — prevents brute-force on sessions
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many auth requests, please try again later." },
+});
+
+app.use(globalLimiter);
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -69,8 +104,8 @@ app.get("/health", (req: Request, res: Response) => {
 // API Routes
 // ─────────────────────────────────────────────────────────────
 
-// Auth routes (no auth middleware required for signup/login)
-app.use("/auth", authRoutes);
+// Auth routes — tighter rate limit (brute-force protection)
+app.use("/auth", authLimiter, authRoutes);
 
 // Protected routes (require authentication)
 app.use("/api/workflows", workflowRoutes);

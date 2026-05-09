@@ -8,14 +8,34 @@
  * It allows external systems to trigger workflows without authentication.
  */
 
+import { timingSafeEqual } from "crypto";
 import { Router, Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { db } from "@/db";
 import { workflows, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { isValidUUID } from "@/lib/validateUUID";
 
 const router = Router();
+
+// 60 webhook triggers per IP per minute — prevents execution flooding
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Rate-limit per IP + workflowId so a single workflow can't be flooded
+    // even if the attacker rotates IPs sharing the same secret
+    const ip = req.ip ?? "unknown";
+    const workflowId = req.params.workflowId ?? "";
+    return `${ip}:${workflowId}`;
+  },
+  message: { error: "Too many webhook requests, please try again later." },
+});
+
+router.use(webhookLimiter);
 
 /**
  * POST /api/webhooks/:workflowId
@@ -45,8 +65,9 @@ router.post("/:workflowId", async (req: Request, res: Response) => {
     }
 
     // Fetch workflow without user auth (public endpoint)
+    // isNull(workflows.deletedAt) ensures soft-deleted workflows cannot be triggered
     const workflow = await db.query.workflows.findFirst({
-      where: eq(workflows.id, workflowId),
+      where: and(eq(workflows.id, workflowId), isNull(workflows.deletedAt)),
       with: {
         nodes: true,
       },
@@ -57,8 +78,14 @@ router.post("/:workflowId", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid webhook secret" });
     }
 
-    // Verify webhook secret matches
-    if (workflow.webhookSecret !== webhookSecret) {
+    // Verify webhook secret using constant-time comparison (prevents timing attacks)
+    const storedSecret = Buffer.from(workflow.webhookSecret ?? "");
+    const providedSecret = Buffer.from(webhookSecret);
+    const secretsMatch =
+      storedSecret.length === providedSecret.length &&
+      timingSafeEqual(storedSecret, providedSecret);
+
+    if (!secretsMatch) {
       return res.status(401).json({ error: "Invalid webhook secret" });
     }
 

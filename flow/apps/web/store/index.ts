@@ -15,20 +15,22 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       token: null,
       user: null,
-      setAuth: (token, user) => {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('flow_token', token);
-        }
-        set({ token, user });
-      },
-      clearAuth: () => {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('flow_token');
-        }
-        set({ token: null, user: null });
-      },
+      setAuth: (token, user) => set({ token, user }),
+      clearAuth: () => set({ token: null, user: null }),
     }),
-    { name: 'flow-auth' }
+    {
+      name: 'flow-auth',
+      // sessionStorage is cleared when the tab closes — the token never persists
+      // across browser sessions. authClient.getSession() re-hydrates the JWT on
+      // each new session without requiring the user to re-enter credentials.
+      storage: typeof window !== 'undefined'
+        ? {
+            getItem: (k) => sessionStorage.getItem(k),
+            setItem: (k, v) => sessionStorage.setItem(k, v),
+            removeItem: (k) => sessionStorage.removeItem(k),
+          }
+        : undefined,
+    }
   )
 );
 

@@ -1,3 +1,4 @@
+import ivm from "isolated-vm";
 import { Resend } from "resend";
 import type { Node, HttpActionConfig, TransformConfig, ConditionConfig, NotifyConfig } from "@/db/schema/nodes";
 
@@ -76,15 +77,24 @@ function executeTransform(
   config: TransformConfig,
   input: Record<string, unknown>,
 ): unknown {
+  // isolated-vm runs the expression inside a V8 isolate with no access to
+  // Node.js globals (process, require, etc.). memoryLimit caps the isolate
+  // at 32 MB; timeout prevents infinite loops.
+  const isolate = new ivm.Isolate({ memoryLimit: 32 });
   try {
-    // Runs the expression in strict mode with `input` in scope.
-    // The expression must evaluate to a value, e.g. "{ name: input.firstName }"
-    const fn = new Function("input", `"use strict"; return (${config.expression})`);
-    return fn(input);
+    const context = isolate.createContextSync();
+    context.global.setSync("input", new ivm.ExternalCopy(input).copyInto());
+    const result = context.evalSync(
+      `(function(input){ "use strict"; return (${config.expression}); })(input)`,
+      { timeout: 1000, copy: true },
+    );
+    return result;
   } catch (err) {
     throw new Error(
       `Transform error: ${err instanceof Error ? err.message : String(err)}`,
     );
+  } finally {
+    isolate.dispose();
   }
 }
 
@@ -151,7 +161,10 @@ async function executeNotifyAction(
     if (!config.webhookUrl) throw new Error("Slack webhook URL is required");
     if (!config.message)    throw new Error("Message is required");
 
-    const message = interpolate(config.message, input);
+    // Escape mrkdwn broadcast mentions injected via webhook payload
+    // (e.g. an attacker sending { "name": "<!channel> urgent" })
+    const raw = interpolate(config.message, input);
+    const message = raw.replace(/<!([^>]+)>/g, "&lt;!$1&gt;");
     const res = await fetch(config.webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
