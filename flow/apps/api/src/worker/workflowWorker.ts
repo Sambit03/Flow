@@ -67,11 +67,19 @@ async function processWorkflow(job: Job<WorkflowJobData>): Promise<void> {
     { nodeId: triggerNode.id, input: payload ?? {} },
   ];
 
+  // Guards against two correctness problems:
+  //   • Merge nodes (diamond A→B→D, A→C→D): without this, D is enqueued twice
+  //     and executes twice because both B and C push it via outEdges.
+  //   • Cycles (A→B→A): without this, the queue grows forever.
+  const visited = new Set<string>();
+
   let finalStatus: "success" | "failed" | "cancelled" = "success";
   let errorMsg: string | undefined;
 
   while (queue.length > 0) {
     const { nodeId, input } = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
     const node = workflow.nodes.find((n) => n.id === nodeId);
     if (!node) continue;
 

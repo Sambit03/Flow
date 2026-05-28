@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   boolean,
+  integer,
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
@@ -18,6 +19,18 @@ export const workflows = pgTable(
 
     name: text("name").notNull(),
     description: text("description"),
+
+    // Lifecycle state machine: draft → published ⇄ paused
+    // draft     — editable, not scheduled, does not respond to webhooks
+    // published — live; isActive=true; increments version on each publish
+    // paused    — frozen; isActive=false; can be resumed without re-publishing
+    status: text("status").default("draft").notNull(),
+
+    // Monotonically increasing counter; incremented on each publish action
+    version: integer("version").default(0).notNull(),
+
+    // Timestamp of the most recent publish action
+    publishedAt: timestamp("published_at", { withTimezone: true }),
 
     // Active flag: only active workflows respond to webhooks and cron
     isActive: boolean("is_active").default(false).notNull(),

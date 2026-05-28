@@ -6,8 +6,8 @@ Express.js backend for the Flow workflow automation system.
 
 - **Framework**: Express.js
 - **Queue**: BullMQ with Redis
-- **Database**: PostgreSQL
-- **Authentication**: Supabase
+- **Database**: PostgreSQL (Neon serverless)
+- **Authentication**: Neon Auth (JWT)
 - **Language**: TypeScript
 
 ## Setup
@@ -18,15 +18,13 @@ Install dependencies from root:
 npm install
 ```
 
-Set environment variables in `.env.local`:
+Set environment variables in `.env`:
 
 ```
 REDIS_HOST=localhost
 REDIS_PORT=6379
 DATABASE_URL=postgresql://user:password@localhost:5432/flow
-SUPABASE_URL=https://...
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE=...
+NEON_AUTH_JWKS_URL=https://...
 ```
 
 ## Database Setup

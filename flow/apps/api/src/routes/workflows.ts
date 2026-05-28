@@ -18,7 +18,7 @@ import { workflows, nodes, edges, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { syncWorkflowSchedule } from "@/scheduler";
+import { syncWorkflowSchedule, cancelWorkflow } from "@/scheduler";
 
 const router = Router();
 
@@ -161,6 +161,14 @@ router.put("/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Workflow not found" });
     }
 
+    // Published/paused workflows are immutable — use /publish, /pause, /resume
+    // to change lifecycle state, or unpublish by setting status back to draft.
+    if (workflow.status !== "draft" && (name || description !== undefined)) {
+      return res.status(409).json({
+        error: `Cannot edit a ${workflow.status} workflow. Pause it first or revert to draft.`,
+      });
+    }
+
     const [updated] = await db
       .update(workflows)
       .set({
@@ -174,15 +182,167 @@ router.put("/:id", async (req: Request, res: Response) => {
       .where(eq(workflows.id, id))
       .returning();
 
-    // Sync the in-memory cron scheduler whenever isActive changes
-    if (isActive !== undefined && updated) {
-      syncWorkflowSchedule(id, updated.isActive, updated.cronExpression);
+    // Resync the in-memory scheduler when isActive OR cronExpression changes.
+    // Previously only triggered on isActive, which left the running schedule
+    // stale when only the expression was updated.
+    if ((isActive !== undefined || cronExpression !== undefined) && updated) {
+      await syncWorkflowSchedule(id, updated.isActive, updated.cronExpression);
     }
 
     res.json(updated);
   } catch (error) {
     console.error("Error updating workflow:", error);
     res.status(500).json({ error: "Failed to update workflow" });
+  }
+});
+
+/**
+ * POST /api/workflows/:id/publish
+ * Transition: draft → published (or re-publish from paused)
+ * Sets isActive=true, increments version, records publishedAt.
+ */
+router.post("/:id/publish", async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user;
+    const { id } = req.params;
+
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid workflow ID format" });
+    }
+
+    const workflow = await db.query.workflows.findFirst({
+      where: and(
+        eq(workflows.id, id),
+        eq(workflows.userId, userId),
+        isNull(workflows.deletedAt),
+      ),
+    });
+
+    if (!workflow) {
+      return res.status(404).json({ error: "Workflow not found" });
+    }
+
+    if (workflow.status === "published") {
+      return res.status(409).json({ error: "Workflow is already published" });
+    }
+
+    const [updated] = await db
+      .update(workflows)
+      .set({
+        status: "published",
+        isActive: true,
+        version: workflow.version + 1,
+        publishedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(workflows.id, id))
+      .returning();
+
+    if (updated?.cronExpression) {
+      await syncWorkflowSchedule(id, true, updated.cronExpression);
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error("Error publishing workflow:", error);
+    res.status(500).json({ error: "Failed to publish workflow" });
+  }
+});
+
+/**
+ * POST /api/workflows/:id/pause
+ * Transition: published → paused
+ * Sets isActive=false without losing the published state.
+ */
+router.post("/:id/pause", async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user;
+    const { id } = req.params;
+
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid workflow ID format" });
+    }
+
+    const workflow = await db.query.workflows.findFirst({
+      where: and(
+        eq(workflows.id, id),
+        eq(workflows.userId, userId),
+        isNull(workflows.deletedAt),
+      ),
+    });
+
+    if (!workflow) {
+      return res.status(404).json({ error: "Workflow not found" });
+    }
+
+    if (workflow.status !== "published") {
+      return res.status(409).json({
+        error: `Cannot pause a workflow with status "${workflow.status}". Only published workflows can be paused.`,
+      });
+    }
+
+    const [updated] = await db
+      .update(workflows)
+      .set({ status: "paused", isActive: false, updatedAt: new Date() })
+      .where(eq(workflows.id, id))
+      .returning();
+
+    // Stop the cron job immediately
+    cancelWorkflow(id);
+
+    res.json(updated);
+  } catch (error) {
+    console.error("Error pausing workflow:", error);
+    res.status(500).json({ error: "Failed to pause workflow" });
+  }
+});
+
+/**
+ * POST /api/workflows/:id/resume
+ * Transition: paused → published
+ * Restores isActive=true without bumping the version.
+ */
+router.post("/:id/resume", async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user;
+    const { id } = req.params;
+
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: "Invalid workflow ID format" });
+    }
+
+    const workflow = await db.query.workflows.findFirst({
+      where: and(
+        eq(workflows.id, id),
+        eq(workflows.userId, userId),
+        isNull(workflows.deletedAt),
+      ),
+    });
+
+    if (!workflow) {
+      return res.status(404).json({ error: "Workflow not found" });
+    }
+
+    if (workflow.status !== "paused") {
+      return res.status(409).json({
+        error: `Cannot resume a workflow with status "${workflow.status}". Only paused workflows can be resumed.`,
+      });
+    }
+
+    const [updated] = await db
+      .update(workflows)
+      .set({ status: "published", isActive: true, updatedAt: new Date() })
+      .where(eq(workflows.id, id))
+      .returning();
+
+    if (updated?.cronExpression) {
+      await syncWorkflowSchedule(id, true, updated.cronExpression);
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error("Error resuming workflow:", error);
+    res.status(500).json({ error: "Failed to resume workflow" });
   }
 });
 

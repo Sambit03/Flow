@@ -4,6 +4,7 @@ import { eq, and, isNull, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { workflows, nodes, executions, stepLogs } from "@/db/schema";
 import { workflowQueue } from "@/queue";
+import type { TriggerConfig } from "@/db/schema/nodes";
 
 // ── Internal job registry ────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ async function triggerCron(workflowId: string): Promise<void> {
 export function scheduleWorkflow(
   workflowId: string,
   expression: string,
+  timezone?: string,
 ): void {
   // Cancel any existing job for this workflow before (re-)scheduling
   cancelWorkflow(workflowId);
@@ -76,20 +78,24 @@ export function scheduleWorkflow(
     return;
   }
 
-  const task = cron.schedule(expression, async () => {
-    try {
-      await triggerCron(workflowId);
-    } catch (err) {
-      console.error(
-        `[Scheduler] Error triggering workflow ${workflowId}:`,
-        err,
-      );
-    }
-  });
+  const task = cron.schedule(
+    expression,
+    async () => {
+      try {
+        await triggerCron(workflowId);
+      } catch (err) {
+        console.error(
+          `[Scheduler] Error triggering workflow ${workflowId}:`,
+          err,
+        );
+      }
+    },
+    { timezone },
+  );
 
   scheduledJobs.set(workflowId, task);
   console.log(
-    `[Scheduler] Scheduled workflow ${workflowId}  expression="${expression}"`,
+    `[Scheduler] Scheduled workflow ${workflowId}  expression="${expression}" timezone="${timezone ?? "server-local"}"`,
   );
 }
 
@@ -103,16 +109,31 @@ export function cancelWorkflow(workflowId: string): void {
 }
 
 /** Called whenever a workflow's isActive or cronExpression changes. */
-export function syncWorkflowSchedule(
+export async function syncWorkflowSchedule(
   workflowId: string,
   isActive: boolean,
   cronExpression: string | null | undefined,
-): void {
-  if (isActive && cronExpression) {
-    scheduleWorkflow(workflowId, cronExpression);
-  } else {
+): Promise<void> {
+  if (!isActive || !cronExpression) {
     cancelWorkflow(workflowId);
+    return;
   }
+
+  // Look up the trigger node's timezone so the scheduler fires at the right
+  // wall-clock time in the user's locale, not the server's local time.
+  const triggerNode = await db.query.nodes.findFirst({
+    where: and(
+      eq(nodes.workflowId, workflowId),
+      eq(nodes.type, "trigger"),
+      isNull(nodes.deletedAt),
+    ),
+  });
+
+  const timezone = triggerNode
+    ? (triggerNode.config as TriggerConfig).timezone
+    : undefined;
+
+  scheduleWorkflow(workflowId, cronExpression, timezone);
 }
 
 /**
@@ -150,12 +171,21 @@ export async function startScheduler(): Promise<void> {
       isNotNull(workflows.cronExpression),
       isNull(workflows.deletedAt),
     ),
+    with: {
+      nodes: {
+        where: and(eq(nodes.type, "trigger"), isNull(nodes.deletedAt)),
+      },
+    },
   });
 
   let scheduled = 0;
   for (const wf of activeWorkflows) {
     if (wf.cronExpression) {
-      scheduleWorkflow(wf.id, wf.cronExpression);
+      const triggerNode = wf.nodes[0];
+      const timezone = triggerNode
+        ? (triggerNode.config as TriggerConfig).timezone
+        : undefined;
+      scheduleWorkflow(wf.id, wf.cronExpression, timezone);
       scheduled++;
     }
   }

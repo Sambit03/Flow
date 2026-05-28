@@ -8,13 +8,13 @@
 
 - **Visual Workflow Canvas** — Drag-and-drop node-based editor powered by ReactFlow. Add trigger, action, condition, and delay nodes; connect them with edges to define execution order.
 - **JWT Authentication** — Secure sign-up and login via Neon Auth. Tokens are validated on every protected API route through middleware; user sessions persist in Zustand.
-- **Real-Time Execution Updates** — Server-Sent Events (SSE) stream per-node status changes (`pending → running → success/failed`) live to the canvas as a workflow executes, with color-coded status rings on each node.
+- **Real-Time Execution Updates** — Server-Sent Events (SSE) stream per-node status changes (`pending → running → success/failed`) live to the canvas as a workflow executes. The stream endpoint polls the database every second and pushes only changed statuses, giving each client an independent, low-latency view.
 - **Async Job Queue** — Workflow execution is offloaded to a BullMQ worker backed by Redis. HTTP responses return immediately with an execution ID; the heavy lifting happens out-of-band at concurrency 5.
 - **Cron & Webhook Triggers** — Workflows support manual triggers, scheduled cron expressions, and inbound webhook endpoints with per-workflow secrets.
 - **Execution History & Logs** — Full audit trail per run: step-level input/output JSON, error messages, duration, attempt count, and overall status with a visual timeline.
 - **Dashboard Overview** — Stats row (total workflows, active count, recent runs, success rate), workflow grid with status badges and run history dots, and a recent runs table.
 - **Soft Delete & Data Safety** — Workflows and nodes use `deletedAt` soft-delete columns; no data is permanently destroyed on user action.
-- **Row-Level Security** — Postgres RLS policies enforce that users can only query their own workflows, executions, and logs.
+- **Application-Level Data Isolation** — Every Drizzle query enforces `WHERE user_id = :userId`, so users can only access their own workflows, executions, and logs.
 - **Rate Limiting** — API-level rate limiting (configurable window + max requests) protects all routes.
 - **Shared TypeScript Types** — A `@flow/types` package shared across the monorepo ensures compile-time consistency between frontend and backend contracts.
 - **Responsive UI** — Dark-mode-first design using IBM Plex Mono/Sans, CSS custom properties, and Tailwind — consistent across viewport sizes.
@@ -109,7 +109,7 @@
               ┌─────────────────▼──┐   ┌────────────▼──────────┐
               │  PostgreSQL (Neon) │   │        Redis           │
               │  users / workflows │   │  BullMQ queue backing  │
-              │  nodes / edges     │   │  + SSE event bus       │
+              │  nodes / edges     │   │                        │
               │  executions / logs │   └────────────┬───────────┘
               └────────────────────┘                │
                                          ┌──────────▼──────────┐
@@ -135,7 +135,7 @@
 ### Queue & Async Execution
 1. The BullMQ worker (`workflowWorker.ts`) picks up jobs, loads the workflow's nodes and edges from Postgres, and walks them in topological order.
 2. `executors.ts` contains per-node-type execution logic (HTTP request, delay, condition branch, etc.).
-3. After each node, the worker writes a `stepLog` record and emits a status event over Redis pub/sub, which `streams.ts` fans out as an SSE message to any connected browser.
+3. After each node, the worker writes a `stepLog` record to Postgres. The SSE endpoint (`streams.ts`) polls these records every second and pushes changed statuses to connected browsers.
 
 ### Authentication Flow
 ```
@@ -338,8 +338,11 @@ All routes are prefixed `/api` and require `Authorization: Bearer <token>` unles
 | `GET` | `/api/workflows` | List user's workflows |
 | `POST` | `/api/workflows` | Create workflow |
 | `GET` | `/api/workflows/:id` | Get workflow + nodes + edges |
-| `PUT` | `/api/workflows/:id` | Update workflow metadata |
+| `PUT` | `/api/workflows/:id` | Update workflow metadata (draft only) |
 | `DELETE` | `/api/workflows/:id` | Soft-delete workflow |
+| `POST` | `/api/workflows/:id/publish` | Publish workflow (draft/paused → published) |
+| `POST` | `/api/workflows/:id/pause` | Pause workflow (published → paused) |
+| `POST` | `/api/workflows/:id/resume` | Resume workflow (paused → published) |
 | `POST` | `/api/workflows/:id/execute` | Trigger execution (enqueues BullMQ job) |
 | `GET` | `/api/executions/:id` | Get execution status |
 | `GET` | `/api/executions/:id/logs` | Step-level logs for an execution |

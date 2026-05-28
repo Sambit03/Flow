@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/create-next-app).
+# Flow Web
 
-## Getting Started
+Next.js 16 frontend for the Flow workflow automation platform.
 
-First, run the development server:
+## Tech Stack
+
+- **Next.js** (App Router) — file-system routing, React Server Components
+- **React 18** — concurrent rendering
+- **ReactFlow** — drag-and-drop node-graph canvas
+- **Zustand** — client state (`useAuthStore`, `useCanvasStore`)
+- **Tailwind CSS** — utility-first styling with dark-mode-first design tokens
+- **Better Auth** (client) — sign-up / login flows integrating with Neon Auth JWTs
+
+## Key Pages
+
+| Route | Description |
+|---|---|
+| `/` | Marketing landing page |
+| `/login` `/signup` | Auth flows |
+| `/dashboard` | Workflow grid, stats row, recent runs |
+| `/workflows/:id` | Canvas editor with live execution panel |
+| `/workflows/:id/runs` | Execution history and step logs |
+| `/settings` | User profile management |
+
+## Development
 
 ```bash
+# From monorepo root
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Web app runs on **http://localhost:3000**. API must be running on port 5000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Real-Time Execution
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load Inter, a custom Google Font.
+The `useExecutionStream` hook (`hooks/useExecutionStream.ts`) opens a
+Server-Sent Events connection to `/api/streams/:executionId` and calls
+`useCanvasStore.setNodeStatus()` on each event, updating the colored status
+rings on canvas nodes in real time.
 
-## Learn More
+## Environment
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No `.env` is needed for the web app in local development — all API calls
+go to `http://localhost:5000` via the `lib/api.ts` fetch wrapper.
